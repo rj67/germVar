@@ -1,35 +1,40 @@
 setwd("/Users/snafu/Documents/Project/germVar")
+table_HGNC_file <- "../dataDump/HGNC/HGNC_ID_table_July_17.txt"
+table_cgc500_file <- "./Gene_List/cancer_gene_census_v70.csv"
+table_tsg716_file <- "../dataDump/TSGene/Human_716_TSGs.txt"
+new_tsg145_file <- "./Gene_List/New_145_TSGs.txt"
+hc_tsg206_file <- "./Gene_List/High_confidence_206_TSGs.txt"
+table_smg260_file <- "./Gene_List/SMG_genes_260.csv"
 
 # -------------------------------------------------------------------------------------
 #  HGNC table, useful for human gene name, gene id, uniprot mapping
 # -------------------------------------------------------------------------------------
-table_HGNC <- read.delim("../dataDump/HGNC/HGNC_ID_table_July_17.txt",stringsAsFactors=F)
+table_HGNC <- read.delim(table_HGNC_file)
 # shortern the column names
 colnames(table_HGNC)[grep("supplied", colnames(table_HGNC), fixed=T)] <- sapply(colnames(table_HGNC)[grep("supplied", colnames(table_HGNC), fixed=T)],
                                                                           function(x) paste(strsplit(x, ".", fixed = T)[[1]][1:2], collapse = "."))
-# pop out the DUX4 entry, change DUX4L1 to DUX4
-#table_HGNC <- table_HGNC[table_HGNC$Approved.Symbol!="DUX4",] 
-#table_HGNC$Approved.Symbol[table_HGNC$Approved.Symbol=="DUX4L1"] <- "DUX4"
+rm(table_HGNC_file)
 
 # -------------------------------------------------------------------------------------
 #  COSMIC 500 gene
 # -------------------------------------------------------------------------------------
-table_cgc500 <- read.csv("./Gene_List/cancer_gene_census_v69.csv", strip.white=T, stringsAsFactors=F)
-# six twelve leukemia is a RNA gene, not in the HGNC table
+table_cgc500 <- read.csv(table_cgc500_file, strip.white=T)
 # C12orf9 is retracted in HGNC 
-# RUNDC2A/DUX4 have  outdated GeneID
-subset(table_cgc500, GeneID %in% setdiff(table_cgc500$GeneID, table_HGNC$Entrez.Gene))
+# RUNDC2A have  outdated GeneID
+# STL six twelve leukemia is a RNA gene, not in the HGNC table
+subset(table_cgc500, Entrez.GeneId %in% setdiff(table_cgc500$Entrez.GeneId, table_HGNC$Entrez.Gene))
 # fix RUNDC2A/DUX4
-table_cgc500$GeneID[table_cgc500$Symbol=="RUNDC2A"] <- 92017
-table_cgc500$GeneID[table_cgc500$Symbol=="DUX4"] <- 100288687
-table_cgc500$Mutation.Type <- gsub( " ", "", table_cgc500$Mutation.Type )
+table_cgc500$Entrez.GeneId[table_cgc500$Gene.Symbol=="RUNDC2A"] <- 92017
+table_cgc500$Mutation.Types <- gsub( " ", "", table_cgc500$Mutation.Types )
 #merge the HGNC gene symbols with the cosmic table
-table_cgc500 <- merge(table_cgc500, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
+table_cgc500 <- merge(table_cgc500, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "Entrez.GeneId", by.y = "Entrez.Gene")
+rm(table_cgc500_file)
+
 
 # -------------------------------------------------------------------------------------
 #  716 Tumor Suppressor gene
 # -------------------------------------------------------------------------------------
-table_tsg716 <- read.delim("../dataDump/TSGene/Human_716_TSGs.txt", strip.white = T, header = T)
+table_tsg716 <- read.delim(table_tsg716_file, strip.white = T, header = T)
 # only keep the first 8 columns
 table_tsg716 <- table_tsg716[,1:8] 
 # remove miscRNA, only include protein coding gene
@@ -38,25 +43,27 @@ table_tsg716 <- subset(table_tsg716, Gene_type=="protein-coding")
 setdiff(table_tsg716$GeneID, table_HGNC$Entrez.Gene)
 # merge the HGNC gene symbols with the tsgene table
 table_tsg716 <- merge(table_tsg716, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
-# 3 genes with different names in 716 vs HGNC
+# 5 genes with different names in 716 vs HGNC
 table_tsg716[c("Gene_symbol", "Approved.Symbol")][!apply(table_tsg716[c("Gene_symbol", "Approved.Symbol")],1, function(x) {x[1]==x[2]}),]
 
 # additional 154
-new_145 <- read.table("./Gene_List/New_145_TSGs.txt", strip.white = T, header =T)
-new_145 <- merge(new_145[c("GeneID")], table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
+new_tsg145 <- read.table(new_tsg145_file, strip.white = T, header =T)
+new_tsg145 <- merge(new_tsg145[c("GeneID")], table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
 #remove the ones without UniProt
-new_145 <- subset(new_145, UniProt.ID!="")
-table_tsg716<-plyr::rbind.fill(table_tsg716, new_145)
+new_tsg145 <- subset(new_tsg145, UniProt.ID!="")
+table_tsg716<-plyr::rbind.fill(table_tsg716, new_tsg145)
 
 # high confidence 206
-tsgene_206 <- scan("./Gene_List/High_confidence_206_TSGs.txt", what = "character")
-table_tsg716$High_conf <- table_tsg716$GeneID %in% tsgene_206
+hc_tsg206 <- scan(hc_tsg206_file, what = "character")
+table_tsg716$High_conf <- table_tsg716$GeneID %in% hc_tsg206
+rm(hc_tsg206, hc_tsg206_file, new_tsg145, new_tsg145_file, table_tsg716_file)
+
 
 
 # -------------------------------------------------------------------------------------
-#  Lander paperp additional 260 genes
+#  Significantly mutated genes additional 260 genes
 # -------------------------------------------------------------------------------------
-table_smg260 <- read.csv("./Gene_List/SMG_genes_260.csv", stringsAsFactors =F)
+table_smg260 <- read.csv(, stringsAsFactors =F)
 # a few gene names are outdated
 setdiff(table_smg260$gene, table_HGNC$Approved.Symbol)
 table_smg260$gene[table_smg260$gene=='SFRS2'] <- 'SRSF2'
