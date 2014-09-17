@@ -1,8 +1,10 @@
 
 setwd("/Users/snafu/Documents/Project/germVar")
 
-#all_tcga <- read.csv('input/all_TCGA_Aug_11.csv', header =T, stringsAsFactors = F)
-all_tcga <- read.csv('input/all_TCGA.csv', header =T, stringsAsFactors = F)
+query_path <- "Input/Sep_10_CGHub_query"
+
+all_tcga <- do.call(rbind, lapply(list.files(query_path, full.names=T, pattern=".csv"), function(x) read.csv(x, header=T)))
+
 print("raw cgquery")
 print(dim(all_tcga))
 
@@ -10,8 +12,6 @@ print(dim(all_tcga))
 all_tcga <- subset(all_tcga, refassem_abbr =="19" & !(platform %in% c("ABI_SOLID", "LS454")) & center !="CGHUB")
 # remove cell lines, weird sample type 12, 13
 all_tcga <- subset(all_tcga, !sample_type %in% c("12", "13", "50"))
-# remove LAML, DLBC, LUSC
-#all_tcga <- subset(all_tcga, !disease %in% c("LAML", "DLBC", "LUSC"))
 # remove filenames that contain HOLD_QC
 all_tcga <- droplevels(all_tcga[-grep("HOLD", all_tcga$filename),])
 all_tcga$Patient <- substr(all_tcga$sample_id, 6, 12)
@@ -23,15 +23,14 @@ all_tcga$Day <- as.numeric(substr(all_tcga$upload_date, 9, 10))
 print("after filter")
 print(dim(all_tcga))
 
-#bam_paths <- read.table("input/all_exist.list", strip.white=T, stringsAsFactors=F)
-bam_paths <- read.table("input/all_bam_uid_SM.list", strip.white=T, stringsAsFactors=F)
+bam_paths <- read.table("input/all_bam_exist_Sep_10.list", strip.white=T, stringsAsFactors=F)
 colnames(bam_paths) <- c("analysis", "SM", "file_path")
 bam_paths$Patient2 <- substr(bam_paths$SM, 6, 12)
 
 # merge tcga dataframe with all existing bam files
-all_tcga <- merge( all_tcga, bam_paths, by ="analysis")
+all_tcga <- merge( all_tcga, bam_paths, by ="analysis", all.x=T)
 # remove ~16 samples where the cgquery info dont match up with SM
-print(c("number of samples where cgquery and SM dont match", sum(with(all_tcga, Patient!=Patient2))))
+print(c("number of samples where cgquery and SM dont match", sum(with(all_tcga, Patient!=Patient2), na.rm=T)))
 all_tcga <- subset(all_tcga, Patient==Patient2)
 
 # sort by date and remove duplicates
@@ -40,6 +39,7 @@ all_tcga <- arrange(all_tcga, disease, Patient, ToN, legacy_sample_id, !exist, -
 print(c("number of duplicates", sum(duplicated(all_tcga$legacy_sample_id))))
 
 all_tcga <- all_tcga[!duplicated(all_tcga$legacy_sample_id), ]
+view(subset(all_tcga, !exist))
 
 #filter out contaminated solid normals
 solid_df <- read.table(file="output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)

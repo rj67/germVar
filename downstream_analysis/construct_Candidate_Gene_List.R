@@ -305,10 +305,11 @@ library(GenomicFeatures)
 supportedUCSCtables()
 hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
 
-#write stratton 500 exons
+#write exons
 list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
 tmp<-droplevels(as.data.frame(list_goi_exons))
 tmp2 <- tmp[grep("hap", tmp$seqnames),]
+subset(list_goi, Entrez.Gene %in% unique(unlist(tmp2$gene_id)))
 
 #convert Grange object to 
 Grange2bed<-function(GrangeObject){
