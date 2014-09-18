@@ -147,7 +147,7 @@ LIT <- c("BCORL1", "PRDM5", "DNMT1","DNMT3B", "HAND2", "ADAMTS15", "FGFR4",
                "BUB1", "BUB3","LZTR1", "PLCG1", "SYNE1", 
               "PREX2", "SOX9", "AMER2", "LDLRAP1", "STMN2", "AGTR2", "ZIM2", "NALCN", "SLC16A4", "MAGEA6", "RPS6KA3", "ROBO2", 
               "HNRNPK", "BRINP3", "KLHL6", "MEF2B", "ACTB", "PCLO", "LRRK2",
-              "MTF1", "GALNT1", "TINF2", "WRAP53", "ELANE", "DKC1", "EPCAM" , "FBP1", "JMJD1C")
+              "MTF1", "GALNT1", "TINF2", "WRAP53", "ELANE", "DKC1", "EPCAM" , "FBP1", "JMJD1C", "USP28", "PTPRF", "BRSK1", "AR", "CSF1R")
 
 list_add <- list(BH3 = BH3, NUA4 = NUA4, PRC2 = PRC2, NURD = NURD, SWISNF = SWISNF, mRNA = mRNA, miRNA = miRNA, LIT=LIT)
 
@@ -235,7 +235,7 @@ table_tag700_out <- merge(table_tag700_out, tmp, by.x="Symbol", by.y="Alias")
 table_tag700_out$Symbol <- table_tag700_out$Approved.Symbol
 table_tag700_out$Approved.Symbol <- NULL
 table_tag700 <- rbind(table_tag700_in, table_tag700_out)
-
+colnames(table_tag700) <- gsub("Symbol", "Gene", colnames(table_tag700))
 
 # -------------------------------------------------------------------------------------
 #  Cancer Genome Landscape review paper
@@ -251,6 +251,8 @@ table_cgl2 <- readWorksheet(loadWorkbook(table_cgl_file), sheet=7, startRow=2)
 table_cgl2 <- subset(table_cgl2, !is.na(Classification.))
 table_cgl2$Gene.Symbol <- gsub("MYCL1", "MYCL", table_cgl2$Gene.Symbol)
 rm(table_cgl_file)
+colnames(table_cgl) <- gsub("Gene.Symbol", "Gene", colnames(table_cgl))
+colnames(table_cgl2) <- gsub("Gene.Symbol", "Gene", colnames(table_cgl2))
 
 # -------------------------------------------------------------------------------------
 #  TUSON TSG and OG
@@ -270,11 +272,11 @@ table_TUSON_fam <- readWorksheet(loadWorkbook(table_TUSON_file), sheet=4, startR
 rm(ref_TUSON_file, table_TUSON_file)
 
 # tag700 designation/ Cancer Genome landscape supplimentary / TUSON designation
-list_goi$TSG <- list_goi$Gene %in% c( subset(table_tag700, Category=="Tumor suppressor gene")$Symbol, 
-                                      subset(table_cgl, Classification.=="TSG")$Gene.Symbol, subset(table_cgl2, Classification.=="TSG")$Gene.Symbol,
+list_goi$TSG <- list_goi$Gene %in% c( subset(table_tag700, Category=="Tumor suppressor gene")$Gene, 
+                                      subset(table_cgl, Classification.=="TSG")$Gene, subset(table_cgl2, Classification.=="TSG")$Gene,
                                       ref_TUSON$TSG, table_TUSON_tsg$Gene, table_TUSON_fam$Gene )
-list_goi$OG <- list_goi$Gene %in% c(subset(table_tag700, Category=="Oncogene")$Symbol,
-                                    subset(table_cgl, Classification.!="TSG")$Gene.Symbol, subset(table_cgl2, Classification.!="TSG")$Gene.Symbol,
+list_goi$OG <- list_goi$Gene %in% c(subset(table_tag700, Category=="Oncogene")$Gene,
+                                    subset(table_cgl, Classification.!="TSG")$Gene, subset(table_cgl2, Classification.!="TSG")$Gene,
                                     ref_TUSON$OG, table_TUSON_og$Gene )
 # name contains proto-oncogene
 list_goi$OG[grep("oncogene", list_goi$Approved.Name)] <- T
@@ -282,10 +284,10 @@ list_goi$OG[grep("oncogene", list_goi$Approved.Name)] <- T
 list_goi$HER <- list_goi$Gene %in% table_TUSON_fam$Gene
 
 #conflicting
-#SMO, PAX5, ELF3, NOTCH1, NOTCH2, DNMT3A, KLF4, EZH2
+#SMO, PAX5, ELF3, NOTCH1, NOTCH2, DNMT3A, KLF4, EZH2, TGFB1
 
 list_goi$Cat <- apply(list_goi[c("TSG", "OG")], 1, function(x) ifelse(x[1], "TSG", ifelse(x[2], "OG", "OTHER")))
-list_goi$Cat[list_goi$Gene %in% c("SMO", "PAX5", "ELF3", "NOTCH1", "NOTCH2", "DNMT3A", "KLF4", "EZH2")] <- "DUAL"
+list_goi$Cat[list_goi$Gene %in% c("SMO", "PAX5", "ELF3", "NOTCH1", "NOTCH2", "DNMT3A", "KLF4", "EZH2", "TGFB1", "ERBB4", "RHOB")] <- "DUAL"
 list_goi$TSG <- NULL
 list_goi$ONCO <- NULL
 rm(table_tag700, table_tag700_file, table_tag700_in, table_tag700_out, tmp, table_TUSON_tsg, table_TUSON_og, ref_TUSON, table_TUSON_fam, table_cgl, table_cgl2)
@@ -304,23 +306,37 @@ if(F){
 library(GenomicFeatures)
 supportedUCSCtables()
 hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
+save(hg19.refgene.tx, file="Results/hg19_refgene_tx.RData")
 
 #write exons
 list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
-tmp<-droplevels(as.data.frame(list_goi_exons))
-tmp2 <- tmp[grep("hap", tmp$seqnames),]
+# show Genes that are in alternative haplotype region
+to_write <- Grange2bed(list_goi_exons)
+tmp2 <- to_write[grep("hap", to_write$seqnames),]
 subset(list_goi, Entrez.Gene %in% unique(unlist(tmp2$gene_id)))
+subset(list_goi, Entrez.Gene %in% unique(unlist(subset(tmp, seqnames=="Y")$gene_id)))
 
 #convert Grange object to 
 Grange2bed<-function(GrangeObject){
-  #require(dplyr)
-  returns<-as.data.frame(GrangeObject)
+  returns<-droplevels(as.data.frame(GrangeObject))
   returns$seqnames<-sapply(returns$seqnames,function(x) gsub("chr","",x))
-  #returns<- arrange(returns, seqnames, start)
   return(returns)
-  #returns<-returns[order(returns$seqnames,returns$start),]
 }
-write.table(Grange2bed(list_goi_exons),file="output/candidate_gene_hg19R_exons.bed",quote=FALSE,row.names=FALSE,col.names=FALSE,sep="\t")
 
+# write the exons, remove alternative haplotype, extend exons by 10bp in both direction
+to_write <- to_write[-grep("hap", to_write$seqnames),]
+to_write$start <- to_write$start - 10
+to_write$end <- to_write$end + 10
+
+writeBed <- function(to_write, outfile){
+  # to_write is a dataframe starting with chrom, start, end columns.
+  # sort the bed and merge interval, write to file
+  infile <- tempfile()
+  write.table(to_write, infile, quote=FALSE,row.names=FALSE,col.names=FALSE,sep="\t")
+  command=paste( "sort -k1,1 -k2,2n", infile, "|", "/opt/bedtools/bin/bedtools merge -i -",">",outfile,sep=" ")
+  cat(command,"\n")
+  try(system(command))
 }
+writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
+
 
