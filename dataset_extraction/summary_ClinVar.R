@@ -3,6 +3,7 @@ require(IRanges)
 # download the vcf
 #########################################################
 load("/Volumes/Orchestra/seq/ClinVar/clinvar_20140902.goi.RData")
+clinvar_vcf <- rescueSnpEffGenes(call_set)
 # only take coding change
 clinvar_vcf <- subset(call_set, Gene %in% list_goi$Gene & Impact %in% c("MODERATE", "HIGH"))
 # remove inframe INDEL
@@ -49,12 +50,13 @@ clinvar_txt <- subset(clinvar_txt, ! (is.na(ALT)|is.na(REF)))
 # remove the truncating variants, with Ter in AA change
 clinvar_txt <- clinvar_txt[!grepl("Ter", clinvar_txt$AA_Change), ]
 # uid for variant
-clinvar_txt$var_uid <- apply(clinvar_txt[c("Gene", "Start", "REF", "ALT")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+clinvar_txt$CHROM <- clinvar_txt$Chromosome
+clinvar_txt$POS <- clinvar_txt$Start
+clinvar_txt <- createVarUid(clinvar_txt)
 # remove duplicates
 clinvar_txt <- arrange(clinvar_txt, var_uid, -nchar(clinvar_txt$OtherIDs))
 clinvar_txt <- clinvar_txt[!duplicated(clinvar_txt$var_uid),]
 
-clinvar_txt$CHROM <- clinvar_txt$Chromosome
-clinvar_txt$POS <- clinvar_txt$Start
-writeBED(clinvar_txt, "./output/clinvar_variants.bed")
+save(clinvar_vcf, clinvar_txt, file="Results/ClinVar.RData")
+
 
