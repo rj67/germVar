@@ -28,6 +28,46 @@ setMethod("View", "VariantCallSet",
           } 
 )
 
+
+# rescue SnpEff annotated call set, where some gene symbols are not in HGNC official list
+# but the transcript used can be found in ensembl database, and use the gene symbol from ensembl
+rescueSnpEffGenes <- function(call_set){
+  if(!exists("table_HGNC")){
+    load("Results/table_HGNC.RData")
+  }
+  if(!exists("ensembl_gff")){
+    load("Results/biomart_ensembl_gff.RData")
+  }
+  #figure out which genes in SnpEff annotated callset are not proper HGNC symbol 
+  rogue_genes <- setdiff(call_set$Gene, table_HGNC$Approved.Symbol)
+  print("rogue genes")
+  print(length(unique(rogue_genes)))
+  print(head(unique(rogue_genes)))
+  if (length(rogue_genes) > 0 ) {
+    # figure out corresponding ensemble transcript
+    rogue_transcript <- unique(subset(call_set, Gene %in% rogue_genes)$Transcript)
+    # get the corresponding ensembl gene names 
+    rogue_ensembl_df <- subset(ensembl_gff, name %in% rogue_transcript)
+    # genes that can be mapped to HGNC
+    rescued_df <- subset(rogue_ensembl_df, symbol %in% table_HGNC$Approved.Symbol)[c("name", "symbol")]
+    colnames(rescued_df)[2] <- "Gene"
+    #  print genes that can be rescued
+    print("rescued genes")
+    print(unique(rescued_df$Gene))
+    # call_set that remain untouched
+    call_set_good <- subset(call_set, !Transcript%in% rescued_df$name)
+    # call_set that need to be rescued
+    call_set_rogue <- subset(call_set, Transcript%in% rescued_df$name)
+    # pop the Gene field
+    call_set_rogue$Gene <- NULL
+    # merge the call_set with ensembl df by Transcript
+    call_set_rogue <- merge(call_set_rogue, rescued_df, by.x="Transcript", by.y="name")
+    call_set <- rbind(call_set_good, call_set_rogue)
+  }
+  return(call_set)
+}  
+
+
 varBurden <-function(NAC, AN, CNTR_AC, CNTR_AN, prefix="CNTR", alt="two.sided"){
   #if(is.na(CNTR_AC) | is.na(CNTR_AN)){
   #  returns<- rep(NA, 3)
