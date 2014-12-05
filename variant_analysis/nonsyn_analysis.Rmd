@@ -1,0 +1,312 @@
+nsSNP analysis
+========================================================
+
+```{r setup, echo=TRUE, results='hide', message=FALSE, cache=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=5, echo=FALSE, width = 300)
+library(knitr)
+library(ff)
+library(ffbase)
+library(VariantAnnotation)
+library(RColorBrewer)
+library(ggthemes)
+setwd("/Users/snafu/Documents/Project/germVar")
+load(file=".RData")
+```
+
+Overview
+---------------------
+
+Overview of the allele frequency of all the nsSNP variants. 
+
+```{r venn_nSNP, eval=TRUE, echo=FALSE, message=FALSE}
+#library(VennDiagram)
+#grid.draw(venn.diagram(list(TCGA=subset(nonsyn_var, tcga_scount!=0)$var_uid,  COSMIC=subset(nonsyn_var, cosm_scount!=0)$var_uid,  ClinVar=subset(nonsyn_var, !is.na(RCVaccession))$var_uid ), 
+#                        filename=NULL, fill = c("red", "green", "blue"), alpha = c(0., 0.5, 0.5),  height = 400, width = 600))
+library(venneuler)
+TCGA=subset(nonsyn_var, tcga_scount!=0)$var_uid
+COSMIC=subset(nonsyn_var, cosm_scount!=0)$var_uid
+ClinVar=subset(nonsyn_var, !is.na(RCVaccession))$var_uid
+vd <- venneuler(c(TCGA = length(TCGA), COSMIC = length(COSMIC), ClinVar=length(ClinVar), 
+                   "TCGA&COSMIC" = length(intersect(TCGA, COSMIC)), 
+                  "TCGA&ClinVar" = length(intersect(TCGA, ClinVar)),
+                  "COSMIC&ClinVar" = length(intersect(COSMIC, ClinVar)), 
+                  "TCGA&COSMIC&ClinVar" = length(intersect(COSMIC, intersect(TCGA, ClinVar)) )))
+par(mar=c(0, 0, 0, 0))
+plot(vd)
+```
+
+Remove `r nrow(subset(info(nonsyn_VARu_comm), pass))` common variants. Among the common variants, `r nrow(subset(info(nonsyn_VARu_comm), pass & !is.na(RCVaccession)))` are in ClinVar.
+None are significantly more frequent than both EA ESP and 1000G. Use CADD and MutationAssessor to predict pathogenicity and choose a somewhat stringent cutoff at 17 for CADD and relaxed threshold "medium" for MA. Bioinformatic predicts 4 variants are deleterious and 3 are in ClinVar annotated pathogenic. 
+```{r common_clinvar_tab, eval=TRUE, message=FALSE, echo=FALSE}
+to_show <- as.data.frame(subset(info(nonsyn_VARu_comm), Clinvar=="Patho/Risk"&pass))
+to_show$ESP_fAF <- with(to_show, ESP_fAC/ESP_fAN)
+kable(to_show[c("Gene", "AAChange", "EAF", "ESP_AF", "X2kG_AF", "ESP_fAF", "SIFT", "ma_pred", "Cscore", "ma_pred", "pred_patho")], digits=2)
+```
+
+
+Compare the 3 different bioinformatic prediction. Plot the number of deleterious variant predicted among the common variants.
+```{r nsSNP_comm_pred_hist, eval=TRUE, message=FALSE, echo=FALSE}
+to_plot <- do.call(rbind, lapply(seq(15, 20), function(x) data.frame(method = paste("Cscore>", x, sep=""), N = sum(info(nonsyn_VARu_comm)$Cscore>x))))
+to_plot <- rbind(to_plot, data.frame(method="SIFT", N = sum(info(nonsyn_VARu_comm)$SIFT=="deleterious")))
+to_plot <- rbind(to_plot, data.frame(method="MA ", N = sum(info(nonsyn_VARu_comm)$ma_pred %in% c("medium", "high"))))
+to_plot <- rbind(to_plot, data.frame(method="MA & Cscore>17 ", N = sum(info(nonsyn_VARu_comm)$ma_pred %in% c("medium", "high") & info(nonsyn_VARu_comm)$Cscore >17 )))
+p <- ggplot(aes(method, N, fill = method), data = to_plot) + geom_bar(stat="identity") + theme_few() 
+p <- p + scale_fill_manual(values=colorRampPalette(brewer.pal(8, "Set2"))(nrow(to_plot)), guide = F) + xlab("")
+p <- p + theme(axis.text= element_text(angle=90))
+p
+```
+
+
+Removing common variants, look at low frequency and rare variants. Predicited deleterious variants are enriched for rare variants and benign variants enriched for common variants.
+
+```{r nsSNP_AF_hist, eval=TRUE, message=FALSE, echo=FALSE, fig.width=9, fig.height=4.5}
+library(gridExtra)
+to_plot <- as.data.frame(info(nonsyn_VARu)[c("var_uid", "EAC", "SIFT", "Cscore", "Origin", "Clinvar", "pred_patho", "Gene")])
+#breaks <- c(0, 1, 2, 3, 5, 8, 13, 20, 35, 55, 90, 150, 250, 400, 650, 1000)
+breaks <- c(0, 1,  3, 5, 8, 13, 20, 35, 55, 90, 150, 250, 400, 650, 1000)
+#to_plot$EAC_bin <- cut(to_plot$EAC, breaks = breaks)
+#to_plot<-merge(to_plot, list_goi[c("Gene", "mem")])
+#to_plot$mem <- to_plot$mem=="CGC"
+#p1 <- ggplot(aes(EAC_bin, fill=Clinvar), data=subset(to_plot, !is.na(pred_patho))) + theme_few() + theme(legend.position="top") + geom_bar(stat="bin") 
+p1 <- ggplot(aes(EAC, fill=Origin), data=to_plot) + theme_few() + stat_bin(right=F) + scale_x_sqrt(breaks=breaks)
+p1 <- p1 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .85) ) +  scale_fill_brewer(palette="Set2")
+p1 <- p1 + xlab("AC")
+
+cols <- c("Benign"="#e78ac3","Deleterious"="#a6d854")
+p2 <- ggplot(aes(EAC), data = to_plot)
+p2 <- p2 + geom_density(aes(fill="Benign"), data=subset(to_plot, pred_patho=="Benign"), alpha=0.7)
+p2 <- p2 + geom_density(aes(fill="Deleterious"), data=subset(to_plot, pred_patho!="Benign"), alpha=0.7)
+p2 <- p2 + scale_x_sqrt(breaks=breaks) + theme_few() + xlab("AC") +theme(legend.position = c(.8, .85)) + scale_fill_manual(values=cols)
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+
+Contingency table for clinvar annotation and predicted pathogenicity. Conflicting clinvar entries are more frequently predicted to be nonpathogenic. 
+```{r nsSNP_pred_clinvar_mosaic, eval=TRUE, message=FALSE, echo=FALSE}
+cont_table<- table(to_plot$pred_patho, to_plot$Clinvar)
+print(cont_table)
+print(rowSums(cont_table))
+print(colSums(cont_table))
+mosaicplot(t(cont_table), color=c("plum3", "lightgreen"), xlab="ClinVar annoation", ylab="Bioinformatic prediction", cex.axis=1.2, main=NULL)
+```
+
+Compare the 3 different bioinformatic prediction. Plot the number of deleterious variant predicted among the common variants.
+```{r nsSNP_pred_hist, eval=TRUE, message=FALSE, echo=FALSE}
+to_plot_df <- as.data.frame(info(nonsyn_VARu))
+to_plot <- do.call(rbind, lapply(seq(15, 20), function(x) data.frame(method = paste("Cscore>", x, sep=""), N = sum(to_plot_df$Cscore>x))))
+to_plot <- rbind(to_plot, data.frame(method="SIFT", N = sum(to_plot_df$SIFT=="deleterious")))
+to_plot <- rbind(to_plot, data.frame(method="MA ", N = sum(to_plot_df$ma_pred %in% c("medium", "high"))))
+to_plot <- rbind(to_plot, data.frame(method="MA & Cscore>17 ", N = sum(to_plot_df$ma_pred %in% c("medium", "high") & to_plot_df$Cscore >17 )))
+p1 <- ggplot(aes(method, N, fill = method), data = to_plot) + geom_bar(stat="identity") + theme_few() 
+p1 <- p1 + scale_fill_manual(values=colorRampPalette(brewer.pal(8, "Set2"))(nrow(to_plot)), guide = F) + xlab("")
+p1 <- p1 + theme(axis.text.x = element_blank())
+#p1
+## ratio between novel and known
+calc_ratio <- function(tbl){
+  return((tbl$Freq[2]/(tbl$Freq[1]+tbl$Freq[2] )/ (tbl$Freq[4]/(tbl$Freq[3]+tbl$Freq[4]))))
+  #return((tbl$Freq[2]/(tbl$Freq[1] )/ (tbl$Freq[4]/(tbl$Freq[3]))))
+}
+to_plot <- do.call(rbind, lapply(seq(15, 20), function(x) {tbl <- as.data.frame(with(to_plot_df, table(Cscore>x, ESP_AC+X2kG_AC>0))); data.frame(method = paste("Cscore>", x, sep=""), ratio = calc_ratio(tbl))}))
+to_plot <- rbind(to_plot, data.frame(method="SIFT", ratio = calc_ratio(as.data.frame(with(to_plot_df, table(SIFT=="deleterious", (ESP_AC+X2kG_AC)>0))))))
+to_plot <- rbind(to_plot, data.frame(method="MA", ratio = calc_ratio(as.data.frame(with(to_plot_df, table(ma_pred %in% c("medium", "high"), (ESP_AC+X2kG_AC)>0))))))
+to_plot <- rbind(to_plot, data.frame(method="MA & Cscore>17", ratio = calc_ratio(as.data.frame(with(to_plot_df, table(ma_pred %in% c("medium", "high") & Cscore>17, (ESP_AC+X2kG_AC)>0))))))
+p2 <- ggplot(aes(method, ratio, fill = method), data = to_plot) + geom_bar(stat="identity") + theme_few() 
+p2 <- p2 + scale_fill_manual(values=colorRampPalette(brewer.pal(8, "Set2"))(nrow(to_plot)), guide = F) + xlab("") + ylab("N(novel)/N(known)")
+p2 <- p2 + theme(axis.text.x= element_text(angle=90))
+#p2
+grid.draw(rbind(ggplotGrob(p1), ggplotGrob(p2), size="first"))
+#grid.arrange(p1, p2, ncol=1)
+```
+
+
+
+For the remaining r nrow(nonsyn_calls@VAR) variants, do a manual literature search of evidence of pathogenicity.
+There is some correlation between CADD prediction and manual literature search, although not perfect
+Show the contingency table of literature search pathogenicity vs CADD predicted pathogenicity, strattified by whether the AC of the variant is greater than 5.
+For AC<5, CADD predict more of the unknown pathogenicity variants to be pathogenic.
+
+
+Low frequency variants
+---------------------
+
+For `r nrow(nonsyn_VARu_lf)` variants where AC greater or equal than 10, distributed in `r length(unique(nonsyn_VARu_lf$Gene))` Genes. Show the different sources of the gene and the combined Clinvar and bioinformatic annotation.
+
+```{r nsSNP_lf_anno_hist, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+# combine Clinvar and prediction
+#nonsyn_VARu_lf$CGC <- sapply(nonsyn_VARu_lf$mem, function(x) ifelse(x=="CGC", "CGC", "Non-CGC"))
+#nonsyn_VARu_lf$gf <- with(nonsyn_VARu_lf, interaction(CGC, pred_patho, drop=T))
+#df <- as.data.frame(with(nonsyn_VARu_lf, table(CGC, Clinvar, pred_patho)))
+p <- ggplot(aes(Origin, fill=pred_patho), data= nonsyn_VARu_lf) + geom_bar(position="dodge") + theme_few()
+p <- p + scale_fill_manual(values =c(Benign="#66c2a5", Deleterious="#fc8d62"), guide = guide_legend(title = NULL)) 
+p <- p + xlab("Clinvar annotation") + theme(legend.position=c(0.8, 0.85))
+p
+```
+
+THere are `r nrow(subset(nonsyn_VARu_lf, mem=="CGC"))` variants in CGC genes, and `r nrow(subset(nonsyn_VARu_lf, mem=="CGC" & HER))` variants are in hereditary cancer genes. 
+A total of `r nrow(subset(nonsyn_VARu_lf, mem=="CGC" & pred_patho=="Deleterious"))` CGC and `r nrow(subset(nonsyn_VARu_lf, mem=="CGC" & pred_patho=="Deleterious" & HER))` hereditary cancer gene variants are predicted pathogenic.
+A total of 64 variants occur in CGC genes, 36 of which occur in genes associated with hereditary cancer syndromes. Out of these, 16 are predicted deleterious, 9 of which occur in hereditary cancer genes. The following table shows the predicted deleterious variants. The affected hereditary cancer genes include ATM, ERCC4, MLH1, MUTYH and SDHD. Of these variants, ATM/S49C has been suggested to increase cancer risk although the association is controversial. The ATM/D1853V has been deemed to not increase breast cancer risk. The MUTYH/G396D and MUTYH/Y179C (also G382D and Y165C) have been associated with familial adenomatous polyposis. ERCC4/R799W has been suggested to impair NER and is associated with xeroderma pigmentosum. SDHD H50R has been associated with Cowden Syndrome. MLH1/V384D results in reduced MMR activity. The MLH1/K618T has been suggested to be nonpathogenic. In other CGC genes, ALDH2/E504K is associated with reduced aldehyde dehydrogenase in Asians. JAK2 G571S has speculated to potentially cause the adjacent import Y570 residue to be constitutively phosphorylated via a conformation change. The TNFAIP3/N102S has been indicated to cause aberrant NFkB signaling. 
+SDHD /G12S, like the H50R variants, is also related to Cowden Syndrome. BUB1B/R564Q is asscociated with recessive mosaic variegated aneuploidy. CHEK2 I200T has been associated with multiple cancers. RET/Y791F has been suggested to be an activating mutation, associated with thyroid cancer. XPC/P334H associated with xeroderma pigmentosum. TERT/H412Y has been shown to reduce TERT activity and is associated with dyskeratosis. WAS/H180N, MPL/K39N and MPL/R102P are associated with thrombocytopenia. MSH6/V878A has been suggested to alter ATPase activity.
+ hypogonadotropic hypogonadism associated DUSP6 S182F, deafness associated GJB2/L90P, nephrolithiasis associated SLC9A3R1/R153Q, schizophrenia associated PRODH variants T466M and L441P.
+```{r nsSNP_lf_hered_tab, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+kable(arrange(subset(nonsyn_VARu_lf, mem=="CGC" & pred_patho=="Deleterious"), !HER, Gene, Clinvar)[c("Gene", "AAChange","EAF","ESP_AF","X2kG_AF","SIFT","fathmm_pred", "Cscore", "ma_pred", "pred_patho","Clinvar","HER")])
+```
+
+For low frequency variants, compare allele frequency with 1000G and ESP. Other than JAK2/V617, six variants are significantly more abundant(in addition to 4 ESP false negative). Out of these, TSC1/K587R, PRODH/R453C are fairly common according to X2kG, so probably not pathogenic. The most significant result is CHEK2/I200T(I157T), which has been previously linked to a variety of cancer in Finnish and Polish population. The odds ratio compared to ESP is roughly 3. Another one is PKD1/R324L, which is associated with polycystic kidney disease(suggested that the variant hinders heterodimerization of PKD1). The odds ratio is 2.8. Both of these two variants have fairly high AF in ExAC.
+
+```{r nsSNP_lowfq_varburden, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+# compare with ESP
+kable(subset(nonsyn_VARu_lf, EA1.padj<0.2&ESP_AC!=0&X2kG.padj<0.2)[c("EAC","EAF","CAC1","CAN1", "ESP_AC","ESP_fAC","ESP_EA_AC","X2kG_AF", "aa_uid", "EA1.padj", "Clinvar", "pred_patho")])
+```
+
+For the low frequency variants, test for the variant status and the expression level of that gene in patient somatic samples. RNASeq counts are standardized per cancer study and then wilcoxon test used to test association. Only a GEN1 S509W variant is significant at 10% FDR after BH adjustment.  GEN1 S509L occurs six times in TCGA
+```{r nsSNP_GEN1_count_box, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+pats <- getGTPat("2-17962005-C-G", nonsyn_GT)
+bg <- subset(GEN1_RNA, Patient %in% pats$All_pat)
+fg <-subset(bg, Patient%in%pats$Var_pat)
+p <- ggplot(aes(reorder(study, normalized_count, median), sqrt(normalized_count)), data=subset(bg, study %in% fg$study)) +geom_boxplot(outlier.shape = NA) + theme_few()
+p <- p + geom_jitter( position = position_jitter(width = .2), aes(color = study, size=3), data=fg)
+p <- p + scale_color_manual(values=colorRampPalette(brewer.pal(8, "Set1"))(nlevels(fg$study)))
+p <- p + theme(axis.text= element_text(angle=90), legend.position="none") + xlab("Study") + ylab("sqrt(Count)")
+p
+```
+
+Some variants show LOH in tumor, group variants in pathogenic groups, see if LOH rate is higher. Result is not
+```{r lowfq_loh, eval=FALSE, echo=FALSE}
+dplyr::summarise(group_by(lowfq@VAR, Pathogenicity), NAC=sum(NAC), LOH=sum(LOH))
+```
+
+For the above variants, test whether mRNA expression or copy number differ. Non significant
+Made sure the difference is not significant when pooling all variants.
+```{r, lowfq_mrna, eval=FALSE, message=FALSE, echo=FALSE, cache=TRUE}
+library(ff)
+library(ffbase)
+#mrna
+lowfq@VAR$mrna.pval <- mapply( function(var, gene){
+  to_test <- subset(lowfq@GT, var_uid==var);
+  bg <- as.data.frame(subset.ffdf(RNASeq, Gene==gene));
+  oneWayTestCallSet(to_test, "mrnaz", bg, F, F)
+}, lowfq@VAR$var_uid, lowfq@VAR$Gene)
+print(c("minimal mrna.pval", signif(min(lowfq@VAR$mrna.pval), 2)))
+#copy number
+lowfq@VAR$cnv.pval <- mapply( function(var, gene){
+  to_test <- subset(lowfq@GT, var_uid==var);
+  bg <- as.data.frame(subset.ffdf(CBio_query, Gene==gene));
+  chisqTestCallSet(to_test, "gistic2", bg, F)
+}, lowfq@VAR$var_uid, lowfq@VAR$Gene)
+print(c("minimal cnv.pval", signif(min(lowfq@VAR$cnv.pval), 2)))
+#kable(subset(lowfq@VAR, cnv.pval<0.05 | mrna.pval<0.05)[c("Gene", "AAChange", "Pathogenicity", "NAC", "NAF", "ESP_EA_AF", "X2kG_AF", "ESP.sign", "X2kG.sign", "Cscore", "LOH", "cnv.pval", "mrna.pval")])
+```
+
+Rare variants
+---------------------
+```{r nsSNP_rr_anno_hist, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+p <- ggplot(aes(Origin, fill=pred_patho), data= nonsyn_VARu_rr) + geom_bar(position="dodge") + theme_few()
+p <- p + scale_fill_manual(values =c(Benign="#66c2a5", Deleterious="#fc8d62"), guide = guide_legend(title = NULL)) 
+p <- p + xlab("Clinvar annotation") + theme(legend.position=c(0.8, 0.9))
+p
+```
+
+```{r nsSNP_rr_cgc_hist, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+to_plot <- subset(nonsyn_VARu_rr, mem=="CGC")
+genes <- unique(droplevels(subset(to_plot, pred_patho!="Benign"))$Gene)
+to_plot <- subset(to_plot, Gene %in% genes)
+genes <- table(to_plot$Gene)
+to_plot$Gene <- factor(to_plot$Gene, levels=names(sort(-genes)))
+p <- ggplot(aes(Gene, fill=Origin), data= to_plot) + geom_bar() + theme_few() +facet_grid(pred_patho~.)
+p <- p + scale_fill_brewer(palette="Set2") + xlab("CGC Genes") + theme(axis.text= element_text(angle=90), legend.position=c(0.85, 0.85))
+p
+```
+
+In the case of TP53, we are interested in gauging how the bioinformatics prediction works by comparing with the functional assay data from IARC TP53 database. If we group the prediction partially-functional as benign, the PPV is ~70%. For the variants listed, the deleterious variants have more AC than ESP. Patient 06-0178 harbors double mutants, is white male age 38 in GBM study.
+```{r nsSNP_TP53_pred_tab, eval=TRUE, message=FALSE, echo=FALSE}
+setwd("/Users/snafu/Documents/Project/germVar")
+tp53 <- read.table(file="Results/TP53_variant_pathogenicity_curation.csv", header=T, sep=",")
+tp53$TA_Class <- factor(tp53$TA_Class, levels=c("functional", "partial", "non-functional"))
+cont_table<- table(tp53$pred_patho, tp53$TA_Class)
+print(cont_table)
+dplyr::summarise(group_by(tp53, TA_Class), TCGA_TAC=sum(EAC), ESP_TAC= sum(ESP_AC))
+```
+
+
+```{r nsSNP_TP53_pat_tab, eval=FALSE, message=FALSE, echo=FALSE}
+tp53_pat <- lapply(tp53$uid, function(x) {Patient <- getVarPat(x, nonsyn_GT); return(data.frame(uid=rep(x, length(Patient)), Patient=Patient))})
+tp53_pat <-  do.call(rbind, tp53_pat)
+tp53_pat <- merge(tp53_pat, tp53[c("uid", "TA_Class")], by="uid")
+tp53 <- as.data.frame(subset(RNASeq, Gene=="TP53"))
+tp53 <- merge(tp53_pat, tp53, by="Patient", all.x=T)
+subset(p53, Patient %in% tmp$Patient)
+``
+
+Now look at rare variants with 30>NAC>=5. Compare allele frequency and mrna, cnv channge.
+RET I852M is novel variant, not present in ESP or 1000G.
+Among pathogenic ones, ASS1 G390R, ERCC4 R799W, MPL R102P, VHL R200W are slightly more frequent than ESP and 1000G, although not statistically significant.
+CTNNB1 N287S, PDX1 D76N, TET2 V1739L, TREX1 R169H show altered copy number change. Only TREX1 is pathogenic, the other 3 unknown. CTNNB1 also has slightly higher LOH rate, 4 out of 18.
+AIP R304Q, LRRK2 P755L, TSHR P162A show altered expression. Only TSHR is pathogenic.
+```{r rare_burden, eval=FALSE, message=FALSE, echo=FALSE, cache=TRUE}
+library(ff)
+library(ffbase)
+rare <- subset(nonsyn_calls, NAC<30 & NAC>=5)
+rare@VAR <- cbind(rare@VAR, t(apply(rare@VAR[c("NAC", "AN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG"))})))
+rare@VAR <- cbind(rare@VAR, t(apply(rare@VAR[c("NAC", "AN", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "ESP"))})))
+rare@VAR$NAF <- rare@VAR$NAC/rare@VAR$AN
+rare@VAR$mrna.pval <- mapply( function(var, gene){
+  to_test <- subset(rare@GT, var_uid==var);
+  bg <- as.data.frame(subset.ffdf(RNASeq, Gene==gene));
+  oneWayTestCallSet(to_test, "mrnaz", bg, F, F)
+}, rare@VAR$var_uid, rare@VAR$Gene)
+rare@VAR$cnv.pval <- mapply( function(var, gene){
+  to_test <- subset(rare@GT, var_uid==var);
+  bg <- as.data.frame(subset.ffdf(CBio_query, Gene==gene));
+  chisqTestCallSet(to_test, "gistic2", bg, F)
+}, rare@VAR$var_uid, rare@VAR$Gene)
+kable(arrange(rare@VAR[c("Gene", "AAChange", "Pathogenicity", "Cancer", "NAC", "NAF", "ESP_AF", "ESP_EA_AF", "X2kG_AF", "ESP.sign", "X2kG.sign", "Cscore", "LOH", "mrna.pval", "cnv.pval")],  Pathogenicity, Gene))
+```
+
+Now look at rare variants NAC <5. Pathogenic and unknown variants have higher proportion of LOH. But overal not very high.
+```{r rare_loh, eval=FALSE, echo=FALSE}
+dplyr::summarise(group_by(subset(nonsyn_calls, NAC<5)@VAR, Pathogenicity), NAC=sum(NAC), LOH=sum(LOH))
+```
+
+For the pathogenic rare variants, a few variants in non CGC500 genes don't seem to have anything to do with cancer. Exclude these
+```{r non_cancer, eval=FALSE, echo=FALSE}
+kable(arrange(subset(nonsyn_calls, Pathogenicity =="Yes" & NAC<5 & Cancer=="No")@VAR[c("Gene", "AAChange", "Pathogenicity", "Note", "NAC","ESP_AC", "X2kG_AC","Cscore", "LOH")], Gene))
+```
+
+Tally the remaining rare pathogenic variants by gene. 
+Show how many variants also occur in ESP and 1000G
+```{r rare_gene, eval=FALSE, echo=FALSE}
+patho <- subset(nonsyn_calls, Pathogenicity =="Yes" & NAC<5 & Cancer!="No" )@VAR
+grid.draw(venn.diagram(list(ALL=patho$var_uid, 
+                            ESP=subset(patho, ESP_AF!=0)$var_uid, 
+                            X2kG=subset(patho, X2kG_AF!=0)$var_uid ), 
+                        filename=NULL, force.unique=F, scaled=T, euler.d=T, height = 400, width = 600))
+rare_tally<-as.data.frame(table(subset(mut_stat, var_uid %in% patho$var_uid)$Gene ))
+colnames(rare_tally)[1] <- "Gene"
+rare_tally <- merge(rare_tally, list_goi[c("Gene", "TS", "ONCO")] )
+rare_tally <- arrange(rare_tally, TS, ONCO, -Freq)
+kable(rare_tally)
+```
+
+
+```{r, eval=FALSE}
+lowfq <- subset(nonsyn_calls, NAC>=10)
+lowfq@VAR <- cbind(lowfq@VAR, t(apply(lowfq@VAR[c("NAC", "AN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG"))})))
+lowfq@VAR <- cbind(lowfq@VAR, t(apply(lowfq@VAR[c("NAC", "AN", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "ESP"))})))
+```
+
+Some variants show LOH in tumor, group variants in pathogenic groups, see if LOH rate is higher. Result is not
+
+
+Misc
+---------------------
+
+20 varriants only occur in normal sample but not in tumor. Most of them are pathogenic.
+```{r missing, eval=FALSE, message=FALSE, echo=FALSE, }
+to_show <- merge(nonsyn_miss_calls@VAR[c("Gene", "AAChange", "Pathogenicity", "var_uid")], nonsyn_miss_calls@GT[c("var_uid", "SAMPLE", "SAMPLE_DP", "SAMPLE_ALT_AD", "SAMPLE_AB")] )
+to_show$var_uid <- NULL
+kable(to_show)
+```
+
+
+
