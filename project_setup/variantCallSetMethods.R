@@ -187,39 +187,66 @@ getGTPat <- function(uid, vcf){
  return(list(Var_pat=Var_pat, All_pat=All_pat))
 }
 
-  vcf<-nonsyn_GT#[1:50,]
-  gt_df <- as.data.frame(geno(vcf)$GT)
-  gt_df$id <- rownames(gt_df)
-  gt_df <- melt(gt_df, id.vars="id", variable.name="SM", value.name="GT")
-  ad_df <- as.data.frame(geno(vcf)$AD)
-  ad_df$id <- rownames(ad_df)
-  ad_df <- melt(ad_df, id.vars="id", variable.name="SM", value.name="GT")
+
+summaryVCFGT <- function(vcf){
+  library(reshape2)
+  idx<- as.numeric(gsub(".","1" ,unlist(info(vcf)$ALT_idx), fixed=T))
+  ## get AD matrix
+  AD_mat <- as.matrix(geno(vcf)$AD)
+  # remove colnames to save space
+  colnames(AD_mat) <- NULL
+  # strip matrix rowwise and stack each row into a matrix
+  AD_rows <- apply(AD_mat, 1, function(x) do.call(rbind, c(x)))
+  # extract relevant AD using idx
+  AD <- mapply(function(AD, idx){ return(cbind(AD[,1], AD[,idx+1] ))}, AD_rows, idx , SIMPLIFY=F)
+  AD <- as.data.frame(do.call(rbind, AD))
+  colnames(AD) <- c("REF_AD", "ALT_AD")
+  #AD$uid <- rep(rownames(vcf), each = dim(vcf)[2])
+  #AD$SM <- rep(colnames(vcf), times = dim(vcf)[1])
   
-sumVCFGT <- function(uid, vcf){
- idx <- info(vcf)[uid, "ALT_idx"][[1]]
- if(idx =="."){
-   idx <- 1
- }else{
-   idx <- as.numeric(idx)
- }
- SAMPLE_ADs <- geno(vcf)$AD[uid, ][grep("1", geno(vcf)$GT[uid,], fixed=T, useBytes=T)] 
- if(length(SAMPLE_ADs)==0){
-   return(data.frame(uid=uid, lowq_AC=0, AD_med=0, AD_max=0, AD_iqr=0, AB_med=0, AB_max=0))
- }else{
-   SAMPLE_DPs <- sapply(SAMPLE_ADs, sum)
-   print(uid)
-   ALT_ADs <- sapply(SAMPLE_ADs, function(x) x[idx+1])
-   ALT_ABs <- ALT_ADs/SAMPLE_DPs
-   ALT_ABs[is.nan(ALT_ABs)] <- 0
-   lowq_AC <- sum( ALT_ADs < 3 | ALT_ABs < 0.15)
-   AD_med <- median(ALT_ADs)
-   AD_max <- max(ALT_ADs)
-   AD_iqr <- IQR(ALT_ADs)
-   AB_med <- signif(median(ALT_ABs), 2)
-   AB_max <- signif(ALT_ABs[order(ALT_ADs)[length(ALT_ADs)]], 2)
-   names(AB_max) <- NULL
-   return(data.frame(uid=uid, lowq_AC=lowq_AC, AD_med=AD_med, AD_max=AD_max, AD_iqr=AD_iqr, AB_med=AB_med, AB_max=AB_max))
- }
+  ## get the Genotype df
+  GT <- as.data.frame(geno(vcf)$GT)
+  # use row label uid to convert wide to long
+  GT$uid <- rownames(GT)
+  GT <- melt(GT, id.vars="uid", variable.name="SM", value.name="GT")  
+  GT$uid <- factor(GT$uid, levels=rownames(vcf))
+  GT$SM <- factor(GT$SM, levels=colnames(vcf))
+  
+  # arrange GT and AD in same order
+  GT <- arrange(GT, uid, SM)
+  #AD <- arrange(AD, uid, SM)
+  GT <- cbind(GT, AD[c("REF_AD", "ALT_AD")])
+  
+  ## tally AC
+  # remove no  call sample
+  GT <- subset(GT, GT!=".")
+  # refactor Patient so Variant equal 2/3 
+  GT$GT <- as.numeric(factor(GT$GT, levels=c("0/0", "0/1", "1/1")))
+  # merge with patient info
+  GT <- plyr::join(GT, all_tcga[c("SM", "Patient", "cauca1")], by="SM")
+  GT$Patient <- factor(GT$Patient)
+  # calculate EAC
+  tally1 <- GT %>% group_by(uid) %>% do(calcPat(.))
+  
+  ## tally Variant AD/AB
+  GT <- subset(GT, GT!=1)
+  GT <- GT %>% mutate( DP = REF_AD+ALT_AD, AB= ALT_AD/DP)
+  GT$AB[is.nan(GT$AB)] <- 0
+  tally2 <- GT %>% group_by(uid) %>% summarise(
+    lowq_AC = sum( ALT_AD < 3 | AB < 0.15),
+    AD_med = median(ALT_AD),
+    AD_max = max(ALT_AD),
+    AD_iqr = IQR(ALT_AD),
+    AB_med = signif(median(AB), 2),
+    AB_max = signif(AB[order(ALT_AD)[length(ALT_AD)]], 2)
+  )
+  
+  tally <- plyr::join(tally1, tally2, by="uid")
+  #some variant dont have any reads, convert NA to 0
+  tally[c("lowq_AC", "AD_med", "AD_max", "AD_iqr", "AB_med", "AB_max")] <- sapply(tally[c("lowq_AC", "AD_med", "AD_max", "AD_iqr", "AB_med", "AB_max")], replaZero)
+  
+  GT <-plyr::join(GT, subset(all_tcga, !duplicated(Patient))[c("Patient", "disease")], by="Patient")
+  return(list(tally=tally, GT=GT))
 }
 
 
