@@ -27,32 +27,39 @@ setMethod("View", "VariantCallSet",
             View(x@VAR)
           } 
 )
+library(VariantAnnotation)
 setMethod("View", "VCF",
           function(vcf, ...) {
             View(info(vcf))
           } 
 )
 setMethod("subset", "VCF",
-          function(vcf, ...) {
-            print(c("before nrow ", nrow(info(vcf))), quote=F);
-            vcf <- vcf[with(info(vcf), ...),];
-            print(c("after nrow ", nrow(info(vcf))), quote=F);
-            return(vcf)
+          function(x, ...) {
+            print(c("before nrow ", nrow(info(x))), quote=F);
+            x <- x[with(info(x), ...),];
+            print(c("after nrow ", nrow(info(x))), quote=F);
+            return(x)
           } 
 )
+# CHROM-POS-REF-ALT
 labelUid <- function(vcf){
-            if(inherits(vcf, "CollapsedVCF")){
-              ALT <- sapply(rowData(vcf)$ALT, function(x) as.character(x[[1]]))
-            }else{
-              ALT <- as.character(rowData(vcf)$ALT)
-            };
-            uid <- apply( cbind(as.character(seqnames(rowData(vcf))), start(ranges(rowData(vcf))), as.character(rowData(vcf)$REF), ALT), 1, function(x) paste0(x, collapse="-"));
-            names(ranges(rowData(vcf))) <- uid;
-            info(header(vcf))["uid",] <- list("1" ,"String", "uid")
-            info(vcf)$uid <- uid; 
-            return(vcf)
+  if(inherits(vcf, "VCF")){
+    if(inherits(vcf, "CollapsedVCF")){
+      ALT <- sapply(rowData(vcf)$ALT, function(x) as.character(x[[1]]))
+    }else{
+      ALT <- as.character(rowData(vcf)$ALT)
+    };
+    uid <- apply( cbind(as.character(seqnames(rowData(vcf))), start(ranges(rowData(vcf))), as.character(rowData(vcf)$REF), ALT), 1, function(x) paste0(x, collapse="-"));
+    names(ranges(rowData(vcf))) <- uid;
+    info(header(vcf))["uid",] <- list("1" ,"String", "uid")
+    info(vcf)$uid <- uid; 
+  }else{
+    vcf$uid <- apply(vcf[c("CHROM", "POS", "REF", "ALT")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+  }
+  return(vcf)
 }
 
+# GENE-POS-REF-ALT
 labelVarUid <- function(vcf){
   if (inherits(vcf, "VCF")){
     info(header(vcf))["var_uid",] <- list("1" ,"String", "var_uid")
@@ -64,10 +71,27 @@ labelVarUid <- function(vcf){
   return(vcf)
 }
 
-labelVEPUid <- function(vcf){
+# extract VEP annotation uid, depending on whether nonsyn or trunc, convert 3 AA letter
+labelVEPUid <- function(vcf, dataset="nonsyn"){
+  # parse HGVSp for nonsyn
   info(header(vcf))["vep_uid",] <- list("1" ,"String", "vep_uid")
-  AA_change <- sapply(as.character(info(vcf)$HGVSp), function(x) gsub("p.", "", strsplit(x, split=":")[[1]][2], fixed=T ))
-  info(vcf)$vep_uid <- apply(cbind(as.character(info(vcf)$var_uid), AA_change), 1, function(x) paste0(x, collapse="-")) ;
+  if(dataset=="nonsyn"){
+    info(header(vcf))["vep_aa",] <- list("1" ,"String", "vep_uid")
+    AA_change <- sapply(as.character(info(vcf)$HGVSp), function(x) gsub(":", "", strsplit(x, split=":")[[1]][2], fixed=T ))
+    # record which rows are actually coding change
+    is_p <- sapply(AA_change, function(x) substr(x, 1, 1)=="p") 
+    is_p <- is_p &  grepl("missense", info(vcf)$Consequence)
+    AA_change <- substr(AA_change, 3, nchar(AA_change))
+    # translate VEP 3 letter amino acid into 1 letter
+    library(seqinr)
+    ref <- a(substr(AA_change[is_p], 1, 3) )
+    alt <- a(substr(AA_change[is_p], nchar(AA_change[is_p])-2, nchar(AA_change[is_p])))
+    AA_change[is_p] <- paste(paste(ref, substr(AA_change[is_p], 4, nchar(AA_change[is_p])-3), sep=""), alt , sep="")
+    info(vcf)$vep_aa <- AA_change
+    info(vcf)$vep_uid <- apply(cbind(as.character(info(vcf)$var_uid), AA_change), 1, function(x) paste0(x, collapse="-")) 
+  }else if (dataset=="trunc"){
+    info(vcf)$vep_uid <- apply(as.data.frame(info(vcf)[c("var_uid", "HGVSc")]), 1, function(x) paste0(x, collapse="-")) 
+  }
   return(vcf)
 }
 
@@ -135,21 +159,22 @@ fixClinGene <- function(vcf){
 }
 
 fixVEPCCDS <- function(vcf){
-  if(!exists("CCDS_enst")){
-    load("Results/CCDS_summary.RData")
-  }
-  #fix_pos <- is.na(info(vcf)$CCDS) | (! info(vcf)$CCDS %in% CCDS_enst$ccds_id) 
-  #if(sum(fix_pos)>0){
-  #  rescued <- merge(info(vcf)[c("CCDS", "Feature")][fix_pos,], CCDS_enst[c("ccds_id", "nucleotide_ID")], by.x="Feature", by.y="nucleotide_ID", all.x=T)
-  #  rescued$CCDS[!is.na(rescued$ccds_id)] <- rescued$ccds_id[!is.na(rescued$ccds_id)]
-  #  info(vcf)$CCDS[fix_pos] <- rescued$CCDS
-  #}
-  CCDS <- plyr::rename(CCDS_enst[c("ccds_id", "nucleotide_ID")], c("nucleotide_ID"="Feature"))
-  print(class(CCDS))
-  rescued <- plyr::join(as.data.frame(info(vcf)[c("Feature")]), CCDS, by="Feature", type="left", match="first")
-  info(header(vcf))["ccds_id",] <- list("1" ,"String", "ccds_id")
-  info(vcf)$ccds_id <- rescued$ccds_id
-  return(vcf)
+    if(!exists("CCDS_enst")){
+      load("Results/CCDS_summary.RData")
+    }
+    CCDS <- plyr::rename(CCDS_enst[c("ccds_id", "nucleotide_ID")], c("nucleotide_ID"="Feature"))
+    print(class(CCDS))
+    rescued <- plyr::join(as.data.frame(info(vcf)[c("Feature")]), CCDS, by="Feature", type="left", match="first")
+    info(header(vcf))["ccds_id",] <- list("1" ,"String", "ccds_id")
+    info(vcf)$ccds_id <- rescued$ccds_id
+    # some CCDS related transcripts not in CCDS_enst, but CCDS contains them
+    rescue_var <- as.data.frame(info(vcf)[c("var_uid", "CCDS", "ccds_id")]) %>% group_by(var_uid) %>% 
+      dplyr::summarise(., num_ccds_id = length(unique(ccds_id[!is.na(ccds_id)])) ,num_ccds = length(unique(CCDS[!is.na(CCDS)]))) %>%
+      subset(., num_ccds>0 & num_ccds_id ==0)
+    print("analomous CCDS field")
+    print(table(subset(info(vcf), var_uid %in% rescue_var$var_uid)$Gene))
+    info(vcf)$ccds_id[info(vcf)$var_uid %in% rescue_var$var_uid] <- info(vcf)$CCDS[info(vcf)$var_uid %in% rescue_var$var_uid]
+    return(vcf)
 }
 
 # split VEP SIFT score
@@ -171,6 +196,7 @@ flipCodon <- function(N, strand){
     stop('invalid strand')
   }  
 }  
+
 labelDomiAllele  <- function(vcf){
   info(header(vcf))["domi_allele",] <- list("0" ,"Flag", "Dominant allele")
   info(vcf)$domi_allele <- FALSE
@@ -187,7 +213,13 @@ getGTPat <- function(uid, vcf){
  return(list(Var_pat=Var_pat, All_pat=All_pat))
 }
 
+getVarPat <- function(uid, vcf){
+  Var_Pat <- samples(header(vcf))[grep("1", geno(vcf)$GT[uid,], fixed=T, useBytes=T)] 
+  Var_pat <- unique(all_tcga$Patient[all_tcga$SM%in%Var_Pat])
+  return(Var_pat)
+}
 
+# summarise variant info and variant patient info from vcf_GT
 summaryVCFGT <- function(vcf){
   library(reshape2)
   idx<- as.numeric(gsub(".","1" ,unlist(info(vcf)$ALT_idx), fixed=T))
@@ -232,7 +264,7 @@ summaryVCFGT <- function(vcf){
   GT <- subset(GT, GT!=1)
   GT <- GT %>% mutate( DP = REF_AD+ALT_AD, AB= ALT_AD/DP)
   GT$AB[is.nan(GT$AB)] <- 0
-  tally2 <- GT %>% group_by(uid) %>% summarise(
+  tally2 <- GT %>% group_by(uid) %>% dplyr::summarise(
     lowq_AC = sum( ALT_AD < 3 | AB < 0.15),
     AD_med = median(ALT_AD),
     AD_max = max(ALT_AD),
@@ -249,6 +281,25 @@ summaryVCFGT <- function(vcf){
   return(list(tally=tally, GT=GT))
 }
 
+# summarise variant info and variant patient info from vcf_GT
+summaryJointGT <- function(GT){
+  GT$is_var <- with(GT, GT %in% c("./1", "0/1", "1/1"))
+  AD <- sapply(GT$AD, function(x) as.numeric(strsplit(x, split=",")[[1]]))
+  GT$DP <- sapply(AD, sum)
+  GT$DP[is.na(GT$DP)] <- 0
+  GT$ALT_AD <- mapply(function(idx, AD) {if(is.na(idx)){return(AD[2])}else{return(AD[idx+1])}}, GT$ALT_idx, AD)
+  GT$ALT_AD[is.na(GT$ALT_AD)] <- 0
+  GT$AB <-  mapply(function(ALT_AD, DP) {if(DP==0){return(0)}else{return(ALT_AD/DP)}}, GT$ALT_AD, GT$DP)    
+  GT <- merge(GT, all_tcga[c("SM", "Patient", "disease", "ToN")], by.x="SAMPLE", by.y="SM")
+  GT$mut_uid <- apply(GT[c("Patient", "var_uid")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+  #GT$event_uid <- apply(GT[c("Patient", "Gene")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+  var_tally <- dplyr::summarise(group_by(GT, var_uid), NAC = length(unique( mut_uid [is_var & ToN =="N"])), TAC = length(unique( mut_uid [is_var & ToN =="T"])) ,
+                                   NACq = length(unique( mut_uid [is_var & ToN =="N" & ALT_AD>=3 & AB >= 0.15 ])), 
+                                   TACq = length(unique( mut_uid [is_var & ToN =="T" & ALT_AD>=3 & AB >= 0.15 ])) ,
+                                   NALT_AD_med = median(ALT_AD[ToN=="N"]), TALT_AD_med = median(ALT_AD[ToN=="T"]),
+                                   NAB_med = median(AB[ToN=="N"]), TAB_med = median(AB[ToN=="T"]), Nonly = all(ToN=="N"))
+  return(list(tally=var_tally, GT=GT))
+}
 
 mergeVCF <- function(vcf, df, by="uid"){
   if (inherits(vcf, "VCF")){
@@ -303,48 +354,56 @@ writeVCF <- function(vcf, filename){
   }
 }  
 
-annoESPX2kG <-function(vcf){
+# output for Mutation Assessor
+writeMA <- function(vcf, filename){
+  if(inherits(vcf, "VCF")){
+    out <- paste("hg19", info(vcf)$uid, sep=",")
+    out <- gsub("-", ",", out)
+    strands <- sapply(info(vcf)$STRAND, function(x)ifelse(x=="1", "+", "-"))
+    #out <- paste(out, strands, sep=" ")
+    #out <- paste(out, info(vcf)$var_uid, sep="\t")
+    write(out, filename)
+  }
+}  
+
+annoESPX2kG <-  function(vcf){
   if(!all(sapply(c("ESP_goi", "X2kG_goi"), exists))){
-    load("DataSet_Results/ESP_X1kG_X2kG_goi.RData")
+    load("DataSet_Results/ESP_X2kG_goi.RData")
   }    
   #vcf <- mergeVCF(vcf, ESP_goi[c("var_uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC", "ESP_EA_AN", "ESP_EA_AF")], by="var_uid")
-  vcf <- mergeVCF(vcf, ESP_goi[c("var_uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_fAC", "ESP_fAN")], by="var_uid")
-  vcf <- mergeVCF(vcf, X2kG_goi[c("var_uid", "X2kG_AC", "X2kG_AN", "X2kG_AF")], by="var_uid")
-  info(vcf)$ESP_AC[is.na(info(vcf)$ESP_AC)] <- 0
-  info(vcf)$ESP_AF[is.na(info(vcf)$ESP_AF)] <- 0
-  info(vcf)$ESP_AN[is.na(info(vcf)$ESP_AN)] <- 13006
-  info(vcf)$ESP_fAC[is.na(info(vcf)$ESP_fAC)] <- 0
-  #info(vcf)$ESP_EA_AF[is.na(info(vcf)$ESP_EA_AF)] <- 0
-  info(vcf)$ESP_fAN[is.na(info(vcf)$ESP_fAN)] <- 9555
-  #info(vcf)$ESP_AN[is.na(info(vcf)$ESP_AN)] <- 8600
-  info(vcf)$X2kG_AC[is.na(info(vcf)$X2kG_AC)] <- 0
-  info(vcf)$X2kG_AF[is.na(info(vcf)$X2kG_AF)] <- 0
-  info(vcf)$X2kG_AN[is.na(info(vcf)$X2kG_AN)] <- 5008
+  # merge with ESP
+  anno_df <- plyr::join(as.data.frame(info(vcf)[c("uid", "AC")]), ESP_goi[c("uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AN", "ESP_EA_AC", "ESP_AA_AN", "ESP_AA_AC")], by="uid")
+  # merge with X2kG
+  anno_df <- plyr::join(anno_df, X2kG_goi[c("uid", "X2kG_AC", "X2kG_AN", "X2kG_AF", "EAS_AF", "SAS_AF", "AMR_AF")], by="uid")
+  # fix NAs
+  anno_df[c("ESP_AC", "ESP_AF", "ESP_EA_AC", "ESP_AA_AC", "X2kG_AC", "X2kG_AF", "EAS_AF", "SAS_AF", "AMR_AF")] <- 
+    sapply(anno_df[c("ESP_AC", "ESP_AF", "ESP_EA_AC", "ESP_AA_AC", "X2kG_AC", "X2kG_AF", "EAS_AF", "SAS_AF", "AMR_AF")], replaZero)
+  anno_df$X2kG_AN[is.na(anno_df$X2kG_AN)] <- 5008
+  anno_df$ESP_AN[is.na(anno_df$ESP_AN)] <- 13006
+  anno_df$ESP_EA_AN[is.na(anno_df$ESP_EA_AN)] <- 8600
+  anno_df$ESP_AA_AN[is.na(anno_df$ESP_AA_AN)] <- 4406
+  # combine ESP_EA with scaled back ESP_AA and X2kG EAS/SAS
+  #based on composition EA:4488, AA:455, AS:394, AM:171
+  anno_df <- anno_df %>% mutate(
+    AS_fAN = ESP_EA_AN/11.4,
+    AS_fAC = AS_fAN*(EAS_AF+SAS_AF),
+    AM_fAN = ESP_EA_AN/26.2,
+    AM_fAC = AM_fAN*AMR_AF,
+    AA_fAN = ESP_EA_AN/9.9,
+    AA_fAC = AA_fAN*ESP_AA_AC/ESP_AA_AN,
+    ESP_fAC = round(ESP_EA_AC + AS_fAC + AM_fAC + AA_fAC), 
+    ESP_fAN = round(ESP_EA_AN + AS_fAN + AM_fAN + AA_fAN), 
+  )
+  vcf <- mergeVCF(vcf, anno_df[c("uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC","ESP_EA_AN", "X2kG_AC", "X2kG_AF", "ESP_fAC", "ESP_fAN")], by="uid")
   return(vcf)
 }
 
-# 
-# annoESPX2kG <-function(vcf){
-#   if(!all(sapply(c("ESP_goi", "X1kG_goi", "X2kG_goi"), exists))){
-#     load("DataSet_Results/ESP_X1kG_X2kG_goi.RData")
-#   }    
-#   call_set <- call_set[, !colnames(call_set)%in% c("ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC", "ESP_EA_AN", "ESP_EA_AF", "X1kG_AF", "X1kG_ERATE", "X1kG_LDAF", "X2kG_AC", "X2kG_AF", "X2kG_AN")]
-#   call_set <- merge(call_set, ESP_goi[c("var_uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC", "ESP_EA_AN", "ESP_EA_AF")], by="var_uid", all.x=T)
-#   call_set <- merge(call_set, X2kG_goi[c("var_uid", "X2kG_AC", "X2kG_AN", "X2kG_AF")], by="var_uid", all.x=T)
-#   call_set <- merge(call_set, X1kG_goi[c("var_uid", "X1kG_AF", "X1kG_ERATE", "X1kG_LDAF")], by="var_uid", all.x=T)
-#   call_set$ESP_AC[is.na(call_set$ESP_AC)] <- 0
-#   call_set$ESP_AF[is.na(call_set$ESP_AF)] <- 0
-#   call_set$ESP_AN[is.na(call_set$ESP_AN)] <- 13006
-#   call_set$ESP_EA_AC[is.na(call_set$ESP_EA_AC)] <- 0
-#   call_set$ESP_EA_AF[is.na(call_set$ESP_EA_AF)] <- 0
-#   call_set$ESP_EA_AN[is.na(call_set$ESP_EA_AN)] <- 8600
-#   call_set$X1kG_AF[is.na(call_set$X1kG_AF)] <- 0
-#   call_set$X1kG_LDAF[is.na(call_set$X1kG_LDAF)] <- 0
-#   call_set$X2kG_AC[is.na(call_set$X2kG_AC)] <- 0
-#   call_set$X2kG_AF[is.na(call_set$X2kG_AF)] <- 0
-#   call_set$X2kG_AN[is.na(call_set$X2kG_AN)] <- 5008
-#   return(call_set)
-# }
+
+replaZero <- function(x){
+  x[is.na(x)] <- 0
+  return(x)
+}
+
 
 # hard filtering
 hardFilter <- function(vcf){
@@ -372,11 +431,15 @@ hardFilter <- function(vcf){
   }
 }  
 
-reduceCOL <- function(vcf){
+reduceCOL <- function(vcf, dataset="nonsyn"){
   if (inherits(vcf, "VCF")){
-    for (coln in c("CCC", "HWP","VariantType", "HaplotypeScore","BioType","HET","HOM","GTNum", "DB", "DS", "END", "RPA", "CANONICAL", "INTRON", "Amino_acids", "Codons", "DISTANCE",
-                   "MNP", "INS", "DEL", "MIXED", "Coding","LoF_info",  "LoF_flags",  "LoF_filter",  "LoF")){
-      info(vcf)[[coln]] <- NULL 
+    if(dataset=="nonsyn"){
+      for (coln in c("CCC", "HWP","VariantType", "HaplotypeScore","BioType","HET","HOM","GTNum", "DB", "DS", "END", "RPA", "CANONICAL", "INTRON", "Amino_acids", "Codons", "DISTANCE",
+                     "MNP", "INS", "DEL", "MIXED", "Coding","LoF_info",  "LoF_flags",  "LoF_filter",  "LoF")){
+        info(vcf)[[coln]] <- NULL }
+    }else if (dataset=="trunc"){
+      for (coln in c("CCC", "HWP","VariantType", "HaplotypeScore","BioType","HET","HOM","GTNum", "DB", "DS", "END", "RPA", "CANONICAL", "SIFT", "PolyPhen", "Codons", "DISTANCE", "MIXED", "Coding")){
+        info(vcf)[[coln]] <- NULL }
     }
     return(vcf)
   }
