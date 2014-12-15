@@ -29,6 +29,12 @@ if __name__ == '__main__':
   vcf_reader.infos['GTNum'] = VcfInfo('GTNum', 1, 'Integer', 'For which alt allele this is for')
   vcf_reader.infos['Warning'] = VcfInfo('Warning', 1, 'String', 'Warning')
   vcf_reader.infos['RPA'] = VcfInfo('RPA', 1, 'Integer', 'Times of tandem repeat')
+  vcf_reader.infos['LOF_Gene'] = VcfInfo('LOF_Gene', 1, 'String', 'LOF gene')
+  vcf_reader.infos['LOF_N_Transcripts'] = VcfInfo('LOF_N_Transcripts', 1, 'Integer', 'Number of transcripts')
+  vcf_reader.infos['LOF_P_Transcripts'] = VcfInfo('LOF_P_Transcripts', 1, 'Float', 'Percentage of transcripts affected')
+  vcf_reader.infos['NMD_Gene'] = VcfInfo('NMD_Gene', 1, 'String', 'LOF gene')
+  vcf_reader.infos['NMD_N_Transcripts'] = VcfInfo('NMD_N_Transcripts', 1, 'Integer', 'Number of transcripts')
+  vcf_reader.infos['NMD_P_Transcripts'] = VcfInfo('NMD_P_Transcripts', 1, 'Float', 'Percentage of transcripts affected')
   
   EFFkeys=['EFF','Impact','FunClass','CodonChange','AAChange','AALength','Gene','BioType','Coding','Transcript','ExonRank','GTNum','Warning']
   writer = vcf.Writer(sys.stdout, vcf_reader, lineterminator='\n')
@@ -40,6 +46,19 @@ if __name__ == '__main__':
       for i in range(len(snpEff)):
         if not snpEff[i] == '':
           Record.INFO[EFFkeys[i]] = snpEff[i]
+    
+    if Record.INFO.get('LOF', False):
+      LOF = Record.INFO['LOF'][0].rstrip(")").lstrip("(").split("|")
+      Record.INFO['LOF_Gene'] = LOF[0]
+      Record.INFO['LOF_N_Transcripts'] = LOF[2]
+      Record.INFO['LOF_P_Transcripts'] = LOF[3]
+    
+    if Record.INFO.get('NMD', False):
+      NMD = Record.INFO['NMD'][0].rstrip(")").lstrip("(").split("|")
+      Record.INFO['NMD_Gene'] = NMD[0]
+      Record.INFO['NMD_N_Transcripts'] = NMD[2]
+      Record.INFO['NMD_P_Transcripts'] = NMD[3]
+  
   
     writer.write_record(Record)
 
