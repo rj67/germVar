@@ -1,87 +1,101 @@
-
+# read vcf using VariantAnnotation interface
 trunc_VAR <- expand(readVcf(file="./Results/norm_trunc.VAR.vcf.gz", "hg19"))
-trunc_VAR <- expand(readVcf(file="./Results/norm_trunc.X.VAR.vcf.gz", "hg19"))
+
 trunc_VAR <- trunc_VAR %>% labelUid  %>%   
+  subset(., !is.na(Transcript) ) %>%
   subset(., Coding == "CODING" ) %>%
-  subset(., BIOTYPE == "protein_coding" )
-%>%
+  subset(., is.na(BIOTYPE) | BIOTYPE == "protein_coding" ) %>%
   fixSnpEffGene %>%
   subset(., Gene %in% list_goi$Gene) %>%
-  subset(., Impact=="HIGH" & EFF!="STOP_LOST") %>% 
-  subset(., Gene==SYMBOL)  %>% 
+  subset(., Impact=="HIGH" ) %>%
+  subset(., is.na(SYMBOL) | Gene==SYMBOL) %>% 
   labelVarUid %>% 
-  fixVEPCCDS %>% 
+  labelSnpEffUid  %>% 
   labelVEPUid(., "trunc") %>% 
   reduceCOL(., "trunc") 
 
+#info(trunc_VAR)$Feature2 <- sapply(info(trunc_VAR)$HGVSc, function(x) strsplit(strsplit(x, split=":")[[1]][1], split=".", fixed=T)[[1]][1])
 
-# preprocess
-trunc_VAR <- trunc_VAR %>% labelUid  %>%   
-  subset(., Coding == "CODING" ) %>%
-  subset(., BIOTYPE == "protein_coding" ) %>%
-  fixSnpEffGene %>%
-  subset(., Gene %in% list_goi$Gene) %>%
-  subset(., Impact=="HIGH" & EFF!="STOP_LOST") %>% 
-  subset(., Gene==SYMBOL)  %>% 
-  labelVarUid %>% 
-  fixVEPCCDS %>% 
-  labelVEPUid(., "trunc") %>% 
-  reduceCOL(., "trunc") 
+### pick longest unique CCDS transcripts for SnpEFF annotation
+# unique variants
+length(unique(info(trunc_VAR)$var_uid))
+# fix LOF_P_Transcripts NAs
+info(trunc_VAR)$LOF_P_Transcripts <- replaZero(info(trunc_VAR)$LOF_P_Transcripts)
+# tally the number of LOF var_uid
+sum(subset(info(trunc_VAR), !duplicated(var_uid))$LOF_P_Transcripts>0)
+# rank snpeff_uid according to AALength, only take one snpeff_uid per var_uid
+uniq_snpeff <- as.data.frame(info(trunc_VAR)) %>% arrange(., -AALength) %>%  subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("snpeff_uid"))
+trunc_VAR <- subset(trunc_VAR, snpeff_uid %in% uniq_snpeff$snpeff_uid)
+# check didn't lose LOF var_uid
+sum(subset(info(trunc_VAR), !duplicated(var_uid))$LOF_P_Transcripts>0)
+length(unique(info(trunc_VAR)$var_uid))
 
-#
+### Simplify VEP Consequence field
 retains <- c("frameshift_variant", "stop_lost", "initiator_codon_variant", "splice_acceptor_variant", "splice_donor_variant", "stop_gained" )
 info(trunc_VAR)$Consequence <- sapply(info(trunc_VAR)$Consequence, function(x) paste0(intersect(strsplit(x, split="&")[[1]], retains), collapse="&"))
 # variants where all the Consequence are NULL
-setdiff(info(trunc_VAR)$var_uid, subset(info(trunc_VAR), Consequence!="")$var_uid)
+subset(info(trunc_VAR), var_uid %in% setdiff(info(trunc_VAR)$var_uid, subset(info(trunc_VAR), Consequence!="")$var_uid))
 
-# remove 6 genes that dont have CCDS
-no_ccds<-as.data.frame(info(trunc_VAR)[c("var_uid", "ccds_id")]) %>% group_by(var_uid) %>% dplyr::summarise(., num_ccds = length(unique(ccds_id[!is.na(ccds_id)]))) %>% subset(., num_ccds==0)
-table(subset(info(trunc_VAR), var_uid %in% no_ccds$var_uid)$Gene)
-trunc_VAR <- trunc_VAR %>% subset(., !is.na(ccds_id)) 
+### Remove VEP annotation fields that aren't in CCDS, excluding variants that don't have any CCDS annotation
+length(unique(info(trunc_VAR)$var_uid))
+# For each variant, tally the number of VEP annotated fields that are in CCDS
+no_ccds<-as.data.frame(info(trunc_VAR)[c("var_uid", "Feature")]) %>% group_by(var_uid) %>% dplyr::summarise(., num_ccds = sum(Feature%in% list_goi_seq, na.rm=T))  %>% subset(., num_ccds==0)
+trunc_VAR <- trunc_VAR %>% subset(., var_uid %in% no_ccds$var_uid | Feature %in% list_goi_seq)
+length(unique(info(trunc_VAR)$var_uid))
 
+### Rank vep_uid according to LoF, only take one vep_uid per var_uid
+# do not use ANC_ALLELE filter, revert them back to LC
+info(trunc_VAR)$LoF[with(info(trunc_VAR), LoF=="LC" & LoF_filter=="ANC_ALLELE")] <- "HC"
 # set LoF NA equal unknown
 info(trunc_VAR)$LoF[is.na(info(trunc_VAR)$LoF)] <- "unknown"
 info(trunc_VAR)$LoF <- factor(info(trunc_VAR)$LoF, levels=c("HC", "LC", "unknown"))
-
-# make sure same vep_uid has same LoF flag
-as.data.frame(info(trunc_VAR)[c("vep_uid", "LoF")]) %>% group_by(vep_uid) %>% dplyr::summarise(., num_lof = length(unique(LoF))) %>% subset(., num_lof>1)
-
 #extract the position info and exon
-info(header(trunc_VAR))["exon_rank",] <- list("1" ,"Integer", "exon_rank")
-info(trunc_VAR)$exon_rank <- sapply(info(trunc_VAR)$EXON, function(x) {exons<-as.numeric(strsplit(x, split="/", fixed=T)[[1]]); exons[2]-exons[1]})
-info(trunc_VAR)$exon_rank[is.na(info(trunc_VAR)$exon_rank)] <- -1
-info(header(trunc_VAR))["position",] <- list("1" ,"Float", "position")
-info(trunc_VAR)$position <- sapply(info(trunc_VAR)$LoF_info, function(x) as.numeric(strsplit(x, split="POSITION:", fixed=T)[[1]][2]))
-info(trunc_VAR)$position[is.na(info(trunc_VAR)$position)] <- 0
-
-# do not use ANC_ALLELE filter, revert them back to LC
-info(trunc_VAR)$LoF[with(info(trunc_VAR), LoF=="LC" & LoF_filter=="ANC_ALLELE")] <- "HC"
-# position >0.9 and last exon set to LC
-info(trunc_VAR)$LoF[with(info(trunc_VAR), exon_rank==0 & position>=0.9)] <- "LC"
-
-# remove LCs
-trunc_VAR <- subset(trunc_VAR, LoF!="LC")
-
-# rank vep_uid according to LoF, only take one vep_uid per var_uid
-uniq_vep <- as.data.frame(info(trunc_VAR)) %>% arrange(., LoF) %>% arrange(., -exon_rank) %>% subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("vep_uid"))
+info(header(trunc_VAR))["T_EXON",] <- list("1" ,"Integer", "T_EXON")
+info(trunc_VAR)$T_EXON <- sapply(info(trunc_VAR)$EXON, function(x) as.numeric(strsplit(x, split="/", fixed=T)[[1]][2]))
+info(header(trunc_VAR))["T_INTRON",] <- list("1" ,"Integer", "T_INTRON")
+info(trunc_VAR)$T_INTRON <- sapply(info(trunc_VAR)$INTRON, function(x) as.numeric(strsplit(x, split="/", fixed=T)[[1]][2]))
+# rank vep_uid by LoF and then by number of EXON and INTRON
+uniq_vep <- as.data.frame(info(trunc_VAR)) %>% arrange(., LoF) %>% arrange(., -T_EXON) %>% arrange(., -T_INTRON) %>% subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("vep_uid"))
 # get the uniq var_uid set
 trunc_VARu <- subset(trunc_VAR, vep_uid %in% uniq_vep$vep_uid) %>% subset(., !duplicated(var_uid))
 
-#trouble with annoESP and uid
-trunc_VARu <- subset(trunc_VARu, uid!="19-57334157-G-A")
-trunc_VARu <- annoESPX2kG(trunc_VARu)
+# make sure same vep_uid has same LoF flag
+#as.data.frame(info(trunc_VAR)[c("vep_uid", "LoF")]) %>% group_by(vep_uid) %>% dplyr::summarise(., num_lof = length(unique(LoF))) %>% subset(., num_lof>1)
+#info(trunc_VAR)$exon_rank <- sapply(info(trunc_VAR)$EXON, function(x) {exons<-as.numeric(strsplit(x, split="/", fixed=T)[[1]]); exons[2]-exons[1]})
+#info(trunc_VAR)$exon_rank[is.na(info(trunc_VAR)$exon_rank)] <- -1
+#info(header(trunc_VAR))["position",] <- list("1" ,"Float", "position")
+#info(trunc_VAR)$position <- sapply(info(trunc_VAR)$LoF_info, function(x) as.numeric(strsplit(x, split="POSITION:", fixed=T)[[1]][2]))
+#info(trunc_VAR)$position[is.na(info(trunc_VAR)$position)] <- 0
+# position >0.9 and last exon set to LC
+#info(trunc_VAR)$LoF[with(info(trunc_VAR), exon_rank==0 & position>=0.9)] <- "LC"
 
+# show contingency table of SnpEff and VEP annotated LoF
+with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), table(LOF_P_Transcripts>0, LoF))
+info(header(trunc_VARu))["tier1",] <- list("1" ,"Flag", "tier1")
+info(header(trunc_VARu))["tier2",] <- list("1" ,"Flag", "tier2")
+info(trunc_VARu)$tier1 <- with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), LOF_P_Transcripts>0 & LoF!= "LC")
+info(trunc_VARu)$tier2 <- with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), (LOF_P_Transcripts>0 & LoF== "LC" )| (LOF_P_Transcripts==0 & LoF=="HC" ))
+#remove LCs
+#trunc_VAR <- subset(trunc_VAR, LoF!="LC")
+
+#Annotate ESP and X1kG population frequency with annoESP and uid
+trunc_VARu <- annoESPX2kG(trunc_VARu)
 
 #manually set POLN 2074702-TG-T  and GEN 17962993-CAAGTT-C to LC
 info(trunc_VARu)["2-17962993-CAAGTT-C","LoF"] <- "LC"
 info(trunc_VARu)["4-2074702-TG-T","LoF"] <- "LC"
+# exclude CASP8-202122956-T-C, since it hits only 1/6 CCDS Transcripts.
+# exclude GEN1-17962993-CAAGTT-C, last exon and near 10% end.
+
+# remove AF>0.99
+trunc_VARu <- subset(trunc_VARu, AF<0.99)
 
 # tally the total high confidence variants in 1000G
-comm_genes <- as.data.frame(info(trunc_VARu)) %>% subset(., LoF=="HC") %>% group_by(., Gene) %>% dplyr::summarise(., tot_X2kG = sum(X2kG_AF)) %>% subset(., tot_X2kG>=0.02) 
+comm_genes <- as.data.frame(info(trunc_VARu)) %>% subset(., tier1) %>% group_by(., Gene) %>% dplyr::summarise(., tot_X2kG = sum(X2kG_AF)) %>% subset(., tot_X2kG>=0.02) 
 comm_genes
 
 # remove these genes
-trunc_VARu <- subset(trunc_VARu, !Gene %in% comm_genes$Gene)
+trunc_VARu <- subset(trunc_VARu, !Gene %in% comm_genes$Gene | Gene %in% c("GEN1", "ECT2L", "CASP8"))
 
 # update the GRange with Gene info so as to query CCDS coding region
 dummy_grange <- as.data.frame(rowData(trunc_VARu))
