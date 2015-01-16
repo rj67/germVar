@@ -1,8 +1,11 @@
+---
+output: html_document
+---
 trunc analysis
 ========================================================
 
-```{r setup, echo=TRUE, results='hide', message=FALSE, cache=FALSE}
-knitr::opts_chunk$set(fig.width=6, fig.height=5, echo=FALSE, width = 300)
+```{r setup, echo=TRUE, message=FALSE, cache=FALSE}
+knitr::opts_chunk$set(fig.width=4, fig.height=4, echo=FALSE, width = 300)
 library(knitr)
 library(ff)
 library(ffbase)
@@ -16,9 +19,9 @@ load(file=".RData")
 Overview
 ---------------------
 
-Overview of the allele frequency of all the nsSNP variants. 
+Overview of the allele frequency of all the truncating variants. `r nrow(info(trunc_VARu))` variants in `r length(unique(info(trunc_VARu)$Gene))` 
 
-```{r trunc_AC_hist, eval=TRUE, echo=FALSE, fig.width=9, fig.height=4., message=FALSE}
+```{r trunc_AC_hist, eval=TRUE, echo=FALSE, fig.width=8, fig.height=4., message=FALSE}
 library(gridExtra)
 to_plot <- merge(as.data.frame(info(trunc_VARu)), list_goi, by="Gene")
 breaks <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 150)
@@ -30,14 +33,26 @@ p1 <- p1 + theme(axis.text.x= element_text(hjust=0.5, angle=90), legend.position
 p1 <- p1 + xlab("AC")
 
 by_gene <- as.data.frame(table(to_plot$Gene))
-by_gene <- merge(by_gene, list_goi, by.x="Var1", by.y="Gene")
-#p2 <- ggplot(aes(Freq, fill=mem), data=by_gene) + theme_few() + stat_bin(right=F) 
-p2 <- ggplot(aes(Freq), data=by_gene) + theme_few() + stat_bin(right=F) 
-p2 <- p2 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .8) ) +  scale_fill_brewer(palette="Set2")
-p2 <- p2 + xlab("#Variant per Gene")
+colnames(by_gene)[1] <- "Gene"
+by_gene <- plyr::join(by_gene, subset(to_plot, !duplicated(Gene))[c("Gene", "AALength")], by="Gene")
+by_gene$Vp100 <- by_gene$Freq/by_gene$AALength*100
+#p2 <- ggplot(aes(Freq), data=by_gene) + theme_few() + stat_bin(right=F) 
+#p2 <- p2 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .8) ) +  scale_fill_brewer(palette="Set2")
+#p2 <- p2 + xlab("#Variant per Gene")
+p2 <- ggplot(aes(Freq, Vp100, color=Gene), data=by_gene) + geom_point(color="red")
+p2 <- p2 + theme_few() + scale_x_sqrt(limits=c(0,25)) + scale_y_sqrt(limits=c(0,3)) 
+p2 <- p2 + geom_text(data=subset(by_gene, Freq>10 | Vp100>2))
+#p2 <- direct.label(p2)
+p2 <- p2 + geom_point(aes(Freq, Vp100), data=by_gene)
 grid.draw(cbind(ggplotGrob(p1), ggplotGrob(p2), size="first"))
 ```
 
+```{r trunc_cat_mosaic, eval=TRUE, echo=FALSE, message=FALSE}
+#mosaic plot of CGC500 variants in TS vs ONCO
+to_plot <- rbind(table(subset(list_goi, cgc500)$Cat), table(subset(merge(as.data.frame(info(trunc_VARu)), list_goi, by="Gene"), cgc500)$Cat))
+rownames(to_plot) <- c("# Gene", "# Variant")
+mosaicplot((to_plot), main="", color=c("white", "pink", "lightgreen", "lightblue"), cex.axis=1.5)
+```
 
 
 
