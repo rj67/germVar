@@ -313,19 +313,50 @@ write.table(list_goi, file="Output/candidate_gene_list.tsv", quote=F, row.names=
 save(table_HGNC, file="Results/table_HGNC.RData")
 save(list_goi, file="Results/candidate_gene_list.RData")
 
-#goi_exons <- read.delim(file="input/candidate_gene_hg19_exons.bed", stringsAsFactors=F, header=F)
-#goi_hap <- rbind(goi_exons[grep("hap", goi_exons$V1),], goi_exons[grep("chrUn", goi_exons$V1),])
-#goi_hap$refseq <- sapply(goi_hap$V4, function(x) strsplit(x, split="_cds_")[[1]][1])
-#goi_hap <- goi_hap[!duplicated(goi_hap$refseq),]
 
+############## #########################################################
+##   USE BIOMART to extract relevant Gene, Transcript info
+############## #########################################################
+ensembl <- useMart(biomart="ENSEMBL_MART_ENSEMBL", host="feb2014.archive.ensembl.org", path="/biomart/martservice", dataset="hsapiens_gene_ensembl")
+
+
+retrieveEnsemblGFF <- function(ensembl, gene.ids){
+  # what information to get for each transcript:
+  sel.attributes=c("ensembl_gene_id", "ensembl_transcript_id", "hgnc_symbol", "chromosome_name", "strand", "start_position","end_position", 
+                   "transcript_start", "transcript_end", "description", "transcript_biotype")
+  # retreive information:
+  ensembl_gff <- getBM(attributes=sel.attributes, filters="ensembl_gene_id", value=gene.ids, mart=ensembl)
+  ## replace attribute names by standardized names
+  ensembl_gff <- ensembl_gff %>% plyr::rename(., c(
+    "ensembl_gene_id" = "Ensembl.ID",
+    "ensembl_transcript_id" = "Transcript",
+    "chromosome_name" = "Chrom",
+    "hgnc_symbol" = "Gene",
+    "transcript_biotype" = "Biotype" 
+  ))
+  return(ensembl_gff)
+}
+
+retrieveEnsemblExons <- function(ensembl, tx.ids){
+  # what information to get for each exon:
+  sel.attributes=c("ensembl_transcript_id", "cds_length", "ensembl_exon_id", "cds_start", "cds_end", "rank","phase", "exon_chrom_start", "exon_chrom_end", "cdna_coding_start", "cdna_coding_end")
+  # retreive information:
+  ensembl_exons <- getBM(attributes=sel.attributes, filters="ensembl_transcript_id", value=tx.ids, mart=ensembl)
+  ## replace attribute names by standardized names
+  ensembl_exons <- ensembl_exons %>% plyr::rename(., c(
+    "ensembl_gene_id" = "Ensembl.ID",
+    "ensembl_transcript_id" = "Transcript",
+    "chromosome_name" = "Chrom",
+    "hgnc_symbol" = "Gene",
+    "transcript_biotype" = "Biotype" 
+  ))
+  return(ensembl_gff)
+}
 if(F){
 library(GenomicFeatures)
 supportedUCSCtables()
 hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
 save(hg19.refgene.tx, file="Results/hg19_refgene_tx.RData")
-
-
-list_goi_exons<-exons(tmp, list(gene_id = list_goi$Ensembl.ID),columns=c("gene_id","exon_id"))
 
 #write exons
 list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
