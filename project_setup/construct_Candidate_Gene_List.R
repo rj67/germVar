@@ -1,5 +1,5 @@
 setwd("/Users/snafu/Documents/Project/germVar")
-table_HGNC_file <- "../dataDump/HGNC/HGNC_ID_table_Nov11.txt"
+table_HGNC_file <- "../dataDump/HGNC/HGNC_ID_table_Jan_2015.txt"
 
 table_cgc500_file <- "./Gene_List/cancer_gene_census_v71.csv"
 table_tsg716_file <- "../dataDump/TSGene/Human_716_TSGs.txt"
@@ -20,10 +20,25 @@ table_cgl_file <- "./Gene_List/Vogelstein_Cancer_Genome_Landscapes_1235122Tables
 #  HGNC table, useful for human gene name, gene id, uniprot mapping
 # -------------------------------------------------------------------------------------
 table_HGNC <- read.delim(table_HGNC_file)
-# shortern the column names
-colnames(table_HGNC)[grep("supplied", colnames(table_HGNC), fixed=T)] <- sapply(colnames(table_HGNC)[grep("supplied", colnames(table_HGNC), fixed=T)],
-                                                                          function(x) paste(strsplit(x, ".", fixed = T)[[1]][1:2], collapse = "."))
-rm(table_HGNC_file)
+### resolve the ENSG field conflict
+conflict <- with(table_HGNC, Ensembl.Gene.ID!="" & Ensembl.Gene.ID!=Ensembl.ID.supplied.by.Ensembl.)
+table_HGNC$Ensembl.ID.supplied.by.Ensembl.[conflict] <- table_HGNC$Ensembl.Gene.ID[conflict]
+### resolve the Entrez.Gene field conflict
+table_HGNC$Entrez.Gene.ID[is.na(table_HGNC$Entrez.Gene.ID)] <- ""
+table_HGNC$Entrez.Gene.ID.supplied.by.NCBI.[is.na(table_HGNC$Entrez.Gene.ID.supplied.by.NCBI.)] <- ""
+conflict <- with(table_HGNC, Entrez.Gene.ID!="" & Entrez.Gene.ID!=Entrez.Gene.ID.supplied.by.NCBI.)
+table_HGNC$Entrez.Gene.ID.supplied.by.NCBI.[conflict] <- table_HGNC$Entrez.Gene.ID[conflict]
+### rename column names
+table_HGNC$Entrez.Gene.ID <- NULL
+table_HGNC$Ensembl.Gene.ID = NULL 
+table_HGNC$RefSeq.IDs = NULL
+table_HGNC$RefSeq.supplied.by.NCBI.=NULL
+table_HGNC <- table_HGNC %>% plyr::rename(., rep=c("Entrez.Gene.ID.supplied.by.NCBI." = "Entrez.Gene", "UniProt.ID.supplied.by.UniProt." = "UniProt", "Ensembl.ID.supplied.by.Ensembl." = "Ensembl.Gene"))
+
+# fix one gene's Ensembl.Gene ID
+table_HGNC$Ensembl.Gene[table_HGNC$Approved.Symbol == "PCGF2"] <- "ENSG00000056661"
+table_HGNC$Ensembl.Gene[table_HGNC$Approved.Symbol == "TAF15"] <- "ENSG00000172660"
+rm(table_HGNC_file, conflict)
 
 # -------------------------------------------------------------------------------------
 #  COSMIC 500 gene
@@ -40,7 +55,7 @@ subset(table_cgc500, Entrez.GeneId %in% setdiff(table_cgc500$Entrez.GeneId, tabl
 table_cgc500$Entrez.GeneId[table_cgc500$Gene.Symbol=="RUNDC2A"] <- 92017
 table_cgc500$Mutation.Types <- gsub( " ", "", table_cgc500$Mutation.Types )
 #merge the HGNC gene symbols with the cosmic table
-table_cgc500 <- merge(table_cgc500, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "Entrez.GeneId", by.y = "Entrez.Gene")
+table_cgc500 <- merge(table_cgc500, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt")], by.x = "Entrez.GeneId", by.y = "Entrez.Gene")
 rm(table_cgc500_file)
 
 
@@ -56,16 +71,16 @@ table_tsg716 <- subset(table_tsg716, Gene_type=="protein-coding")
 setdiff(table_tsg716$GeneID, table_HGNC$Entrez.Gene)
 #GSTT1 not in HGNC, for some reason, something about alternate reference loci HGNC:4641
 # merge the HGNC gene symbols with the tsgene table
-table_tsg716 <- merge(table_tsg716, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
+table_tsg716 <- merge(table_tsg716, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt")], by.x = "GeneID", by.y = "Entrez.Gene")
 # 5 genes with different names in 716 vs HGNC
 table_tsg716[c("Gene_symbol", "Approved.Symbol")][!apply(table_tsg716[c("Gene_symbol", "Approved.Symbol")],1, function(x) {x[1]==x[2]}),]
 
 # additional 154
 new_tsg145 <- read.table(new_tsg145_file, strip.white = T, header =T)
 subset(new_tsg145, GeneID %in% setdiff(new_tsg145$GeneID, table_HGNC$Entrez.Gene))
-new_tsg145 <- merge(new_tsg145[c("GeneID")], table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
+new_tsg145 <- merge(new_tsg145[c("GeneID")], table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt")], by.x = "GeneID", by.y = "Entrez.Gene")
 #remove the ones without UniProt
-new_tsg145 <- subset(new_tsg145, UniProt.ID!="")
+new_tsg145 <- subset(new_tsg145, UniProt!="")
 table_tsg716<-plyr::rbind.fill(table_tsg716, new_tsg145)
 
 # high confidence 206
@@ -202,7 +217,7 @@ list_goi <- merge(list_goi, grp_genes, by="Gene", all.x=T)
 
 
 #get the full name
-list_goi <- merge(list_goi, table_HGNC[c("Approved.Symbol", "Approved.Name", "Entrez.Gene", "UniProt.ID", "Ensembl.ID", "CCDS.IDs", "Locus.Type", "Locus.Group")], by.x = "Gene", by.y = "Approved.Symbol")
+list_goi <- merge(list_goi, table_HGNC[c("Approved.Symbol", "Approved.Name", "Entrez.Gene", "UniProt", "Ensembl.Gene", "CCDS.IDs", "Locus.Type", "Locus.Group")], by.x = "Gene", by.y = "Approved.Symbol")
 
 # remove RNA genes and pseudogene
 print( subset(list_goi, Locus.Group!= "protein-coding gene" ))
@@ -317,21 +332,43 @@ save(list_goi, file="Results/candidate_gene_list.RData")
 ############## #########################################################
 ##   USE BIOMART to extract relevant Gene, Transcript info
 ############## #########################################################
+library("biomaRt")
 ensembl <- useMart(biomart="ENSEMBL_MART_ENSEMBL", host="feb2014.archive.ensembl.org", path="/biomart/martservice", dataset="hsapiens_gene_ensembl")
 
+### query the GRCh37.75 database using Ensembl.Gene as id
+# only keep protein-coding, remove transcripts on alternative loci
+list_gff <- retrieveEnsemblGFF(ensembl, "ensembl_gene_id", list_goi$Ensembl.Gene) %>% subset(., Biotype=="protein_coding") %>% subset(., !grepl("PATCH", Chrom))
+# check list_goi Gene names are the same
+list_gff <- plyr::join(list_gff, list_goi[c("Ensembl.Gene", "Gene")], by="Ensembl.Gene")
+subset(list_gff, Gene != hgnc_symbol)
+list_gff$hgnc_symbol <- NULL
+# check the genes that dont have any transcript
+subset(list_goi, Gene %in% setdiff(list_goi$Gene, list_gff$Gene))
 
-retrieveEnsemblGFF <- function(ensembl, gene.ids){
+### query the GRCh37.75 database for Exon coordinates, using transcript id
+list_exons <-  retrieveEnsemblExons(ensembl, list_gff$Transcript) 
+# remove duplicate exon
+list_exons <- subset(list_exons, !duplicated(exon_id)) %>% plyr::join(., list_gff[c("Transcript", "Chrom")], by="Transcript") %>% arrange(., Chrom, exon_chrom_start)
+
+
+# write the exons, remove alternative haplotype, extend exons by 10bp in both direction
+to_write <- list_exons[c("Chrom", "exon_chrom_start", "exon_chrom_end")]
+to_write$exon_chrom_start <- to_write$exon_chrom_start - 10
+to_write$exon_chrom_end <- to_write$exon_chrom_end + 10
+
+writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
+
+retrieveEnsemblGFF <- function(ensembl, query_field, query_ids){
   # what information to get for each transcript:
   sel.attributes=c("ensembl_gene_id", "ensembl_transcript_id", "hgnc_symbol", "chromosome_name", "strand", "start_position","end_position", 
                    "transcript_start", "transcript_end", "description", "transcript_biotype")
   # retreive information:
-  ensembl_gff <- getBM(attributes=sel.attributes, filters="ensembl_gene_id", value=gene.ids, mart=ensembl)
+  ensembl_gff <- getBM(attributes=sel.attributes, filters=query_field, value=query_ids, mart=ensembl)
   ## replace attribute names by standardized names
   ensembl_gff <- ensembl_gff %>% plyr::rename(., c(
-    "ensembl_gene_id" = "Ensembl.ID",
+    "ensembl_gene_id" = "Ensembl.Gene",
     "ensembl_transcript_id" = "Transcript",
     "chromosome_name" = "Chrom",
-    "hgnc_symbol" = "Gene",
     "transcript_biotype" = "Biotype" 
   ))
   return(ensembl_gff)
@@ -344,14 +381,22 @@ retrieveEnsemblExons <- function(ensembl, tx.ids){
   ensembl_exons <- getBM(attributes=sel.attributes, filters="ensembl_transcript_id", value=tx.ids, mart=ensembl)
   ## replace attribute names by standardized names
   ensembl_exons <- ensembl_exons %>% plyr::rename(., c(
-    "ensembl_gene_id" = "Ensembl.ID",
-    "ensembl_transcript_id" = "Transcript",
-    "chromosome_name" = "Chrom",
-    "hgnc_symbol" = "Gene",
-    "transcript_biotype" = "Biotype" 
+    "ensembl_exon_id" = "exon_id",
+    "ensembl_transcript_id" = "Transcript"
   ))
-  return(ensembl_gff)
+  return(ensembl_exons)
 }
+
+writeBed <- function(to_write, outfile){
+  # to_write is a dataframe starting with chrom, start, end columns.
+  # sort the bed and merge interval, write to file
+  infile <- tempfile()
+  write.table(to_write, infile, quote=FALSE,row.names=FALSE,col.names=FALSE,sep="\t")
+  command=paste( "sort -k1,1 -k2,2n", infile, "|", "/opt/bedtools/bin/bedtools merge -i -",">",outfile,sep=" ")
+  cat(command,"\n")
+  try(system(command))
+}
+
 if(F){
 library(GenomicFeatures)
 supportedUCSCtables()
@@ -372,21 +417,5 @@ Grange2bed<-function(GrangeObject){
   returns$seqnames<-sapply(returns$seqnames,function(x) gsub("chr","",x))
   return(returns)
 }
-
-# write the exons, remove alternative haplotype, extend exons by 10bp in both direction
-to_write <- to_write[-grep("hap", to_write$seqnames),]
-to_write$start <- to_write$start - 10
-to_write$end <- to_write$end + 10
-
-writeBed <- function(to_write, outfile){
-  # to_write is a dataframe starting with chrom, start, end columns.
-  # sort the bed and merge interval, write to file
-  infile <- tempfile()
-  write.table(to_write, infile, quote=FALSE,row.names=FALSE,col.names=FALSE,sep="\t")
-  command=paste( "sort -k1,1 -k2,2n", infile, "|", "/opt/bedtools/bin/bedtools merge -i -",">",outfile,sep=" ")
-  cat(command,"\n")
-  try(system(command))
-}
-writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
 
 }
