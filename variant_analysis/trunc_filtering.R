@@ -14,67 +14,38 @@ trunc_VAR <- trunc_VAR %>% labelUid  %>%
   labelVEPUid(., "trunc") %>% 
   reduceCOL(., "trunc") 
 
-#info(trunc_VAR)$Feature2 <- sapply(info(trunc_VAR)$HGVSc, function(x) strsplit(strsplit(x, split=":")[[1]][1], split=".", fixed=T)[[1]][1])
 
 ### pick longest unique CCDS transcripts for SnpEFF annotation
-# unique variants
-length(unique(info(trunc_VAR)$var_uid))
+trunc_VARu <- pickSnpEffTranscript(trunc_VAR)
+
 # fix LOF_P_Transcripts NAs
-info(trunc_VAR)$LOF_P_Transcripts <- replaZero(info(trunc_VAR)$LOF_P_Transcripts)
-# tally the number of LOF var_uid
-sum(subset(info(trunc_VAR), !duplicated(var_uid))$LOF_P_Transcripts>0)
-# rank snpeff_uid according to AALength, only take one snpeff_uid per var_uid
-uniq_snpeff <- as.data.frame(info(trunc_VAR)) %>% arrange(., -AALength) %>%  subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("snpeff_uid"))
-trunc_VAR <- subset(trunc_VAR, snpeff_uid %in% uniq_snpeff$snpeff_uid)
-# check didn't lose LOF var_uid
-sum(subset(info(trunc_VAR), !duplicated(var_uid))$LOF_P_Transcripts>0)
-length(unique(info(trunc_VAR)$var_uid))
+info(trunc_VARu)$LOF_P_Transcripts <- replaZero(info(trunc_VARu)$LOF_P_Transcripts)
+info(trunc_VARu)$NMD_P_Transcripts <- replaZero(info(trunc_VARu)$NMD_P_Transcripts)
+
 
 ### Simplify VEP Consequence field
-retains <- c("frameshift_variant", "stop_lost", "initiator_codon_variant", "splice_acceptor_variant", "splice_donor_variant", "stop_gained" )
-info(trunc_VAR)$Consequence <- sapply(info(trunc_VAR)$Consequence, function(x) paste0(intersect(strsplit(x, split="&")[[1]], retains), collapse="&"))
-# variants where all the Consequence are NULL
-subset(info(trunc_VAR), var_uid %in% setdiff(info(trunc_VAR)$var_uid, subset(info(trunc_VAR), Consequence!="")$var_uid))
+trunc_VARu <- trunc_VARu %>% simplifyVEPConseq
 
 ### Remove VEP annotation fields that aren't in CCDS, excluding variants that don't have any CCDS annotation
-length(unique(info(trunc_VAR)$var_uid))
-# For each variant, tally the number of VEP annotated fields that are in CCDS
-no_ccds<-as.data.frame(info(trunc_VAR)[c("var_uid", "Feature")]) %>% group_by(var_uid) %>% dplyr::summarise(., num_ccds = sum(Feature%in% list_goi_seq, na.rm=T))  %>% subset(., num_ccds==0)
-trunc_VAR <- trunc_VAR %>% subset(., var_uid %in% no_ccds$var_uid | Feature %in% list_goi_seq)
-length(unique(info(trunc_VAR)$var_uid))
+trunc_VARu <- trunc_VARu %>% filterVEPTranscript(., CCDS_15[["nucleotide_ID"]])
 
 ### Rank vep_uid according to LoF, only take one vep_uid per var_uid
-# do not use ANC_ALLELE filter, revert them back to LC
-info(trunc_VAR)$LoF[with(info(trunc_VAR), LoF=="LC" & LoF_filter=="ANC_ALLELE")] <- "HC"
-# set LoF NA equal unknown
-info(trunc_VAR)$LoF[is.na(info(trunc_VAR)$LoF)] <- "unknown"
-info(trunc_VAR)$LoF <- factor(info(trunc_VAR)$LoF, levels=c("HC", "LC", "unknown"))
-#extract the position info and exon
-info(header(trunc_VAR))["T_EXON",] <- list("1" ,"Integer", "T_EXON")
-info(trunc_VAR)$T_EXON <- sapply(info(trunc_VAR)$EXON, function(x) as.numeric(strsplit(x, split="/", fixed=T)[[1]][2]))
-info(header(trunc_VAR))["T_INTRON",] <- list("1" ,"Integer", "T_INTRON")
-info(trunc_VAR)$T_INTRON <- sapply(info(trunc_VAR)$INTRON, function(x) as.numeric(strsplit(x, split="/", fixed=T)[[1]][2]))
-# rank vep_uid by LoF and then by number of EXON and INTRON
-uniq_vep <- as.data.frame(info(trunc_VAR)) %>% arrange(., LoF) %>% arrange(., -T_EXON) %>% arrange(., -T_INTRON) %>% subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("vep_uid"))
-# get the uniq var_uid set
-trunc_VARu <- subset(trunc_VAR, vep_uid %in% uniq_vep$vep_uid) %>% subset(., !duplicated(var_uid))
+trunc_VARu <- trunc_VARu %>% pickVEPTranscript
 
-# make sure same vep_uid has same LoF flag
-#as.data.frame(info(trunc_VAR)[c("vep_uid", "LoF")]) %>% group_by(vep_uid) %>% dplyr::summarise(., num_lof = length(unique(LoF))) %>% subset(., num_lof>1)
-#info(trunc_VAR)$exon_rank <- sapply(info(trunc_VAR)$EXON, function(x) {exons<-as.numeric(strsplit(x, split="/", fixed=T)[[1]]); exons[2]-exons[1]})
-#info(trunc_VAR)$exon_rank[is.na(info(trunc_VAR)$exon_rank)] <- -1
-#info(header(trunc_VAR))["position",] <- list("1" ,"Float", "position")
-#info(trunc_VAR)$position <- sapply(info(trunc_VAR)$LoF_info, function(x) as.numeric(strsplit(x, split="POSITION:", fixed=T)[[1]][2]))
-#info(trunc_VAR)$position[is.na(info(trunc_VAR)$position)] <- 0
-# position >0.9 and last exon set to LC
-#info(trunc_VAR)$LoF[with(info(trunc_VAR), exon_rank==0 & position>=0.9)] <- "LC"
+# check vairant effects, remove all variants that contain stop_lost since it's near the end
+table(info(trunc_VARu)$EFF)
+trunc_VARu <- subset(trunc_VARu, !grepl("stop_lost", info(trunc_VARu)$EFF))
+
+# consolidate SnpEff LoF prediction
+info(header(trunc_VARu))["LoF_snpeff",] <- list("1" ,"Flag", "LoF_snpeff")
+info(trunc_VARu)$LoF_snpeff <- with(as.data.frame(info(trunc_VARu)[c("NMD_P_Transcripts", "LOF_N")]), NMD_P_Transcripts>0 | LOF_N>0) 
 
 # show contingency table of SnpEff and VEP annotated LoF
-with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), table(LOF_P_Transcripts>0, LoF))
+with(as.data.frame(info(trunc_VARu)[c("LoF_snpeff", "LoF")]), table(LoF_snpeff, LoF))
 info(header(trunc_VARu))["tier1",] <- list("1" ,"Flag", "tier1")
 info(header(trunc_VARu))["tier2",] <- list("1" ,"Flag", "tier2")
-info(trunc_VARu)$tier1 <- with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), LOF_P_Transcripts>0 & LoF!= "LC")
-info(trunc_VARu)$tier2 <- with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcripts", "LoF")]), (LOF_P_Transcripts>0 & LoF== "LC" )| (LOF_P_Transcripts==0 & LoF=="HC" ))
+info(trunc_VARu)$tier1 <- with(as.data.frame(info(trunc_VARu)[c("LoF_snpeff", "LoF")]), LoF_snpeff & LoF!= "LC")
+info(trunc_VARu)$tier2 <- with(as.data.frame(info(trunc_VARu)[c("LoF_snpeff", "LoF")]), (LoF_snpeff & LoF== "LC" )| (!LoF_snpeff & LoF=="HC" ))
 #remove LCs
 #trunc_VAR <- subset(trunc_VAR, LoF!="LC")
 
@@ -82,10 +53,11 @@ info(trunc_VARu)$tier2 <- with(as.data.frame(info(trunc_VARu)[c("LOF_P_Transcrip
 trunc_VARu <- annoESPX2kG(trunc_VARu)
 
 #manually set POLN 2074702-TG-T  and GEN 17962993-CAAGTT-C to LC
-info(trunc_VARu)["2-17962993-CAAGTT-C","LoF"] <- "LC"
-info(trunc_VARu)["4-2074702-TG-T","LoF"] <- "LC"
+#info(trunc_VARu)["2-17962993-CAAGTT-C","LoF"] <- "LC"
+#info(trunc_VARu)["4-2074702-TG-T","LoF"] <- "LC"
 # exclude CASP8-202122956-T-C, since it hits only 1/6 CCDS Transcripts.
 # exclude GEN1-17962993-CAAGTT-C, last exon and near 10% end.
+# "BRCA1-41276044-ACT-A" should be a tier1 , for some reason SnpEff didn't say LoF.
 
 # remove AF>0.99
 trunc_VARu <- subset(trunc_VARu, AF<0.99)
@@ -98,12 +70,12 @@ comm_genes
 trunc_VARu <- subset(trunc_VARu, !Gene %in% comm_genes$Gene | Gene %in% c("GEN1", "ECT2L", "CASP8"))
 
 # update the GRange with Gene info so as to query CCDS coding region
-dummy_grange <- as.data.frame(rowData(trunc_VARu))
-dummy_grange$Gene <- info(trunc_VARu)$Gene
-dummy_grange$start <- as.numeric(dummy_grange$start)
-dummy_grange$end <- as.numeric(dummy_grange$end)
-info(header(trunc_VARu))["CCDS_hits",] <- list("1" ,"Integer", "CCDS_hits")
-info(trunc_VARu)$CCDS_hits <- with(dummy_grange, mapply(queryCCDS, Gene, start, end))
+#dummy_grange <- as.data.frame(rowData(trunc_VARu))
+#dummy_grange$Gene <- info(trunc_VARu)$Gene
+#dummy_grange$start <- as.numeric(dummy_grange$start)
+#dummy_grange$end <- as.numeric(dummy_grange$end)
+#info(header(trunc_VARu))["CCDS_hits",] <- list("1" ,"Integer", "CCDS_hits")
+#info(trunc_VARu)$CCDS_hits <- with(dummy_grange, mapply(queryCCDS, Gene, start, end))
 
 
 
@@ -117,7 +89,7 @@ chr_tally <- list()
 for (chr in chrs){ 
   print(chr)
   print("read in GT", quote=F)
-  trunc_GT <- (readVcf(file=paste0("./Results/norm_trunc.GT.", chr ,".vcf.gz", collapse=""), "hg19"))
+  trunc_GT <- (readVcf(file=paste0("./Results/norm_trunc.", chr ,".GT.vcf.gz", collapse=""), "hg19"))
   #update GT 
   print("filter GT", quote=F)
   trunc_GT <- trunc_GT  %>% labelUid %>% subset(., uid %in% info(trunc_VARu)$uid) 
@@ -126,7 +98,7 @@ for (chr in chrs){
 }
 trunc_tally <- list()
 trunc_tally$tally <- do.call(rbind, lapply(chr_tally, function(x) x$tally))
-# six variants are missing
+# three variants are missing
 subset(info(trunc_VARu), !uid%in% trunc_tally$tally$uid)
 trunc_VARu <- subset(trunc_VARu, uid %in% trunc_tally$tally$uid)
 # get the nonsyn_GT variant summary, EAC, EAN, sample AD and AB, etc
@@ -138,7 +110,9 @@ trunc_VARu <- labelDomiAllele(trunc_VARu)
 # quality filter 
 trunc_VARu <- hardFilter(trunc_VARu)
 
-# 
+# set variants that are in 1kG pass
+info(trunc_VARu)$pass[with(as.data.frame(info(trunc_VARu)[c("pass", "X2kG_AC")]), !pass & X2kG_AC>0)] <- T
+
 trunc_VARu <- subset(trunc_VARu, pass)
 
 
@@ -149,13 +123,12 @@ trunc_VARu <- subset(trunc_VARu, pass)
 require(plyr)
 # joint call variant file
 VAR_files <- list.files(path = "./Results/trunc_fpout", pattern="VAR", recursive=F, full.names=T, )
-trunc_VARj <- do.call(rbind.fill, lapply(VAR_files, function(x) read.delim(x, strip.white=T, stringsAsFactors=F, na.strings = "")))
+trunc_VARj <- do.call(plyr::rbind.fill, lapply(VAR_files, function(x) read.delim(x, strip.white=T, stringsAsFactors=F, na.strings = "")))
 # joint call GT file
 GT_files <- list.files(path = "./Results/trunc_fpout", pattern="GT", recursive=F, full.names=T, )
 trunc_GTj <- do.call(rbind, lapply(GT_files, function(x) read.delim(x, strip.white=T, stringsAsFactors=F, na.strings = "")))
 trunc_GTj <- plyr::join(trunc_GTj, trunc_VARj[c("ALT_idx", "var_uid")], by="var_uid")
                         
-
 joint_tally <- summaryJointGT(trunc_GTj)
 
 # update trunc_VARj
@@ -191,8 +164,6 @@ trunc_VARu <- subset(trunc_VARu, !var_uid %in% c("TP53-7578555-C-CT" , "TINF2-24
 tmp2 <- dplyr::summarise(group_by(tmp, var_uid), N_LOH = sum(LOH), N_PIT = sum(PIT))
 var_tally <- merge(var_tally, tmp2, by="var_uid")
 
-trunc_filt <- subset(trunc_filt, var_uid %in% VAR$var_uid)
-View(subset(trunc_filt, !var_uid %in% VAR$var_uid))
 
 
 

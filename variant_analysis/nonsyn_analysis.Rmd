@@ -59,26 +59,40 @@ p
 
 Removing common variants, look at low frequency and rare variants. Predicited deleterious variants are enriched for rare variants and benign variants enriched for common variants.
 
-```{r nsSNP_AF_hist, eval=TRUE, message=FALSE, echo=FALSE, fig.width=9, fig.height=4.5}
+```{r nsSNP_AC_hist, eval=TRUE, message=FALSE, echo=FALSE, fig.width=4, fig.height=4}
 library(gridExtra)
 to_plot <- as.data.frame(info(nonsyn_VARu)[c("var_uid", "EAC", "SIFT", "Cscore", "Origin", "Clinvar", "pred_patho", "Gene")])
 #breaks <- c(0, 1, 2, 3, 5, 8, 13, 20, 35, 55, 90, 150, 250, 400, 650, 1000)
-breaks <- c(0, 1,  3, 5, 8, 13, 20, 35, 55, 90, 150, 250, 400, 650, 1000)
-#to_plot$EAC_bin <- cut(to_plot$EAC, breaks = breaks)
-#to_plot<-merge(to_plot, list_goi[c("Gene", "mem")])
-#to_plot$mem <- to_plot$mem=="CGC"
-#p1 <- ggplot(aes(EAC_bin, fill=Clinvar), data=subset(to_plot, !is.na(pred_patho))) + theme_few() + theme(legend.position="top") + geom_bar(stat="bin") 
-p1 <- ggplot(aes(EAC, fill=Origin), data=to_plot) + theme_few() + stat_bin(right=F) + scale_x_sqrt(breaks=breaks)
-p1 <- p1 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .85) ) +  scale_fill_brewer(palette="Set2")
-p1 <- p1 + xlab("AC")
+breaks <- c(0, 1,  3, 5, 10, 25, 50, 100, 150, 250)
 
-cols <- c("Benign"="#e78ac3","Deleterious"="#a6d854")
-p2 <- ggplot(aes(EAC), data = to_plot)
-p2 <- p2 + geom_density(aes(fill="Benign"), data=subset(to_plot, pred_patho=="Benign"), alpha=0.7)
-p2 <- p2 + geom_density(aes(fill="Deleterious"), data=subset(to_plot, pred_patho!="Benign"), alpha=0.7)
-p2 <- p2 + scale_x_sqrt(breaks=breaks) + theme_few() + xlab("AC") +theme(legend.position = c(.8, .85)) + scale_fill_manual(values=cols)
+#cols <- c(Benign="#a6d854", Deleterious="#e78ac3" )
+#p1 <- ggplot(aes(EAC), data=to_plot) + theme_few() + geom_histogram(aes(y = ..count..), fill ="lightgrey", color="black") + scale_x_sqrt(breaks=breaks)
+#p1 <- p1 + geom_density(aes(y = ..density.. * 150, fill = "Benign"), data=subset(to_plot, pred_patho=="Benign"), alpha = 0.5)
+#p1 <- p1 + geom_density(aes(y = ..density.. * 150, fill = "Deleterious"), data=subset(to_plot, !pred_patho=="Benign"), alpha = 0.5)
+#p1 <- p1 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .85) ) +  scale_fill_manual(values=cols, guide = guide_legend(title = ""))
+#p1 <- p1 + xlab("AC") + ylab("Count")
+#p1
+p1 <- ggplot(aes(EAC), data=to_plot) + theme_few() + geom_histogram(aes(y = ..count..), fill ="darkgrey") + scale_x_sqrt(breaks=breaks)
+p1 <- p1 + theme(axis.text= element_text(hjust=0.5), legend.position = c(.8, .85), axis.title=element_text(size=rel(.7)))
+p1 <- p1 + geom_vline(xintercept=10, color="red", linetype=3) + geom_vline(xintercept=160, color="red", linetype=3)
+p1 <- p1 + xlab("Allele count") + ylab("Number of variants") 
+p1
+ggsave(filename="nsSNP_AC_hist.png",height=4, width=4)
 
-grid.arrange(p1, p2, ncol=2)
+cols <- c(Benign="#a6d854", Deleterious="#e78ac3" )
+p2 <- ggplot(to_plot, aes(pred_patho, EAC, fill=pred_patho)) + geom_violin() + scale_y_sqrt(breaks=breaks) + coord_flip() + theme_few()
+p2 <- p2 + theme(axis.text.y= element_text(hjust=0.5, size=rel(.7), angle=90), axis.title=element_text(size=rel(.7)))
+p2 <- p2 + ylab("Allele count") + xlab("Predicted impact")
+p2 <- p2 + scale_fill_manual(values=cols, guide = "none")
+p2
+ggsave(filename="nsSNP_pred_AC_violin.png",height=4, width=4)
+
+#p2 <- ggplot(aes(EAC), data = to_plot)
+#p2 <- p2 + geom_density(aes(fill="Benign"), data=subset(to_plot, pred_patho=="Benign"), alpha=0.7)
+#p2 <- p2 + geom_density(aes(fill="Deleterious"), data=subset(to_plot, pred_patho!="Benign"), alpha=0.7)
+#p2 <- p2 + scale_x_sqrt(breaks=breaks) + theme_few() + xlab("AC") +theme(legend.position = c(.8, .85)) + scale_fill_manual(values=cols)
+
+#grid.arrange(p1, p2, ncol=2)
 ```
 
 
@@ -194,7 +208,7 @@ lowfq@VAR$cnv.pval <- mapply( function(var, gene){
   bg <- as.data.frame(subset.ffdf(CBio_query, Gene==gene));
   chisqTestCallSet(to_test, "gistic2", bg, F)
 }, lowfq@VAR$var_uid, lowfq@VAR$Gene)
-print(c("minimal cnv.pval", signif(min(lowfq@VAR$cnv.pval), 2)))
+print(c("minimal cnv.pval", signif(min(lowfq@VAR$cnv.pval), 2)))http://127.0.0.1:24724/graphics/plot_zoom_png?width=1200&height=900
 #kable(subset(lowfq@VAR, cnv.pval<0.05 | mrna.pval<0.05)[c("Gene", "AAChange", "Pathogenicity", "NAC", "NAF", "ESP_EA_AF", "X2kG_AF", "ESP.sign", "X2kG.sign", "Cscore", "LOH", "cnv.pval", "mrna.pval")])
 ```
 
@@ -207,15 +221,23 @@ p <- p + xlab("Clinvar annotation") + theme(legend.position=c(0.8, 0.9))
 p
 ```
 
-```{r nsSNP_rr_cgc_hist, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
-to_plot <- subset(nonsyn_VARu_rr, mem=="CGC")
-genes <- unique(droplevels(subset(to_plot, pred_patho!="Benign"))$Gene)
-to_plot <- subset(to_plot, Gene %in% genes)
-genes <- table(to_plot$Gene)
-to_plot$Gene <- factor(to_plot$Gene, levels=names(sort(-genes)))
-p <- ggplot(aes(Gene, fill=Origin), data= to_plot) + geom_bar() + theme_few() +facet_grid(pred_patho~.)
-p <- p + scale_fill_brewer(palette="Set2") + xlab("CGC Genes") + theme(axis.text= element_text(angle=90), legend.position=c(0.85, 0.85))
+```{r nsSNP_rr_cgc_hist, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
+to_plot <- droplevels(subset(nonsyn_VARu_rr, (mem=="CGC" | HER) & pred_patho!="Benign"))[c("Gene", "AAChange", "AA_pos", "var_uid")]
+#genes <- table(subset(to_plot, pred_patho!="Benign")$Gene) %>% as.data.frame %>% arrange(., -Freq)
+#to_plot$Gene <- factor(to_plot$Gene, levels=genes$Var1)
+#p <- ggplot(aes(Gene, fill=Origin), data= subset(to_plot, pred_patho!="Benign")) + geom_histogram() + theme_few() 
+#p <- p + scale_fill_brewer(palette="Set2") + xlab("CGC Genes") + theme(axis.text= element_text(angle=90), legend.position=c(0.85, 0.85))
+#p <- p + ylab("Count")
+#p
+to_plot <- group_by(to_plot, Gene) %>% mutate(., ord=order(AA_pos))
+gene_tally <- group_by(to_plot, Gene) %>% dplyr::summarise(., N_var=length(unique(var_uid))) %>% arrange(., -N_var)
+to_plot$Gene <- factor(to_plot$Gene, levels=gene_tally$Gene)
+p <- ggplot(aes(Gene, ord, label=AAChange), data= to_plot) + geom_text(size=2, angle=90, hjust=1) + theme_few() 
+p <- p + theme(axis.text.x=element_text(angle=90, vjust=0.5, size=rel(.7))) + scale_y_continuous(breaks=c(0, 2, 4, 6, 8, 10), limits=c(0.5, 9))
+p <- p + xlab("") + ylab("Number of variants") + theme(axis.title.y=element_text(size=rel(.7)))
+p <- p + theme(plot.margin = unit(c(0.5, 0, 0.5, 0), "cm"))
 p
+ggsave(filename="nsSNP_rr_cgc_hist.png",height=4., width=5)
 ```
 
 In the case of TP53, we are interested in gauging how the bioinformatics prediction works by comparing with the functional assay data from IARC TP53 database. If we group the prediction partially-functional as benign, the PPV is ~70%. For the variants listed, the deleterious variants have more AC than ESP. Patient 06-0178 harbors double mutants, is white male age 38 in GBM study.

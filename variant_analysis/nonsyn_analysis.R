@@ -81,8 +81,13 @@ nonsyn_VARu_lf$X2kG_AN <- 5008
 nonsyn_VARu_lf <- cbind(nonsyn_VARu_lf, as.data.frame(t(apply(nonsyn_VARu_lf[c("EAC", "EAN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG", "t.test", "greater"))}))))
 nonsyn_VARu_lf$X2kG.padj <- p.adjust(nonsyn_VARu_lf$X2kG.pval, method="BH") 
  
-view(subset(nonsyn_VARu_lf, EA1.padj <0.2 & X2kG.padj<0.2  )[c("AC","EAC", "EAN", "EAF", "CAC1", "CAN1","ESP_AC", "ESP_AN", "ESP_fAC", "ESP_fAN", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "uid", "AAChange", 
-                                            "ESPf.pval", "EA1.pval","X2kG.padj", "Clinvar", "SIFT", "Cscore", "fathmm_pred", "RCVaccession", "OtherIDs"  )])
+lf_table <- subset(nonsyn_VARu_lf, (EA1.padj <0.15 & X2kG.padj<0.2))[c( "EAF", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "var_uid", "AAChange", "EA1.padj", "X2kG.padj")]
+lf_table <- lf_table %>% mutate( EAF = signif(EAF, 2), CAF1 = signif(CAC1/CAN1, 2), ESP_EA_AF = signif(ESP_EA_AC/ESP_EA_AN, 2), X2kG_AF = signif(X2kG_AF, 2), EA1.padj = signif(EA1.padj, 2), X2kG.padj = signif(X2kG.padj, 2))
+lf_table <- arrange(lf_table[c("Gene", "AAChange", "EAF", "CAF1", "ESP_EA_AF", "X2kG_AF", "EA1.padj", "X2kG.padj", "var_uid")], EA1.padj)
+
+view(lf_table)
+#view(subset(nonsyn_VARu_lf, EA1.padj <0.2 & X2kG.padj<0.2  )[c("AC","EAC", "EAN", "EAF", "CAC1", "CAN1","ESP_AC", "ESP_AN", "ESP_fAC", "ESP_fAN", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "uid", "AAChange", 
+#                                            "ESPf.pval", "EA1.pval","X2kG.padj", "Clinvar", "SIFT", "Cscore", "fathmm_pred", "RCVaccession", "OtherIDs"  )])
 
 ##########################################
 # expression change
