@@ -1,7 +1,7 @@
 setwd("/Users/snafu/Documents/Project/germVar")
-table_HGNC_file <- "../dataDump/HGNC/HGNC_ID_table_July_17.txt"
+table_HGNC_file <- "../dataDump/HGNC/HGNC_ID_table_Nov11.txt"
 
-table_cgc500_file <- "./Gene_List/cancer_gene_census_v70.csv"
+table_cgc500_file <- "./Gene_List/cancer_gene_census_v71.csv"
 table_tsg716_file <- "../dataDump/TSGene/Human_716_TSGs.txt"
 new_tsg145_file <- "./Gene_List/New_145_TSGs.txt"
 hc_tsg206_file <- "./Gene_List/High_confidence_206_TSGs.txt"
@@ -11,7 +11,9 @@ fam_files_path <- "./Gene_List/"
 rep_files_path <- "./Gene_List/"
 table_tag700_file <- "./Gene_List/Tumor_Associated_Genes.csv"
 ref_TUSON_file <- "../dataDump/TUSON/mmc2.xls"
-table_TUSON_file <- "../dataDump/TUSON/mmc3.xls"
+table_TUSON_A_file <- "../dataDump/TUSON/mmc3.A.csv"
+table_TUSON_B_file <- "../dataDump/TUSON/mmc3.B.csv"
+table_TUSON_D_file <- "../dataDump/TUSON/mmc3.D.csv"
 table_cgl_file <- "./Gene_List/Vogelstein_Cancer_Genome_Landscapes_1235122TablesS1-4.xls"
 
 # -------------------------------------------------------------------------------------
@@ -27,11 +29,14 @@ rm(table_HGNC_file)
 #  COSMIC 500 gene
 # -------------------------------------------------------------------------------------
 table_cgc500 <- read.csv(table_cgc500_file, strip.white=T)
+# BCL5 a locus
 # C12orf9 is retracted in HGNC 
+# C15orf21 is pseudogene
 # RUNDC2A have  outdated GeneID
-# STL six twelve leukemia is a RNA gene, not in the HGNC table
+# DUX4 reference, but probably meant DUX4L1 which is a pseudogene
+# STL/TCL6/MALAT1 are RNA gene, not in the HGNC table
 subset(table_cgc500, Entrez.GeneId %in% setdiff(table_cgc500$Entrez.GeneId, table_HGNC$Entrez.Gene))
-# fix RUNDC2A/DUX4
+# fix RUNDC2A
 table_cgc500$Entrez.GeneId[table_cgc500$Gene.Symbol=="RUNDC2A"] <- 92017
 table_cgc500$Mutation.Types <- gsub( " ", "", table_cgc500$Mutation.Types )
 #merge the HGNC gene symbols with the cosmic table
@@ -49,6 +54,7 @@ table_tsg716 <- table_tsg716[,1:8]
 table_tsg716 <- subset(table_tsg716, Gene_type=="protein-coding")
 # make sure all genes are in HGNC
 setdiff(table_tsg716$GeneID, table_HGNC$Entrez.Gene)
+#GSTT1 not in HGNC, for some reason, something about alternate reference loci HGNC:4641
 # merge the HGNC gene symbols with the tsgene table
 table_tsg716 <- merge(table_tsg716, table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
 # 5 genes with different names in 716 vs HGNC
@@ -56,6 +62,7 @@ table_tsg716[c("Gene_symbol", "Approved.Symbol")][!apply(table_tsg716[c("Gene_sy
 
 # additional 154
 new_tsg145 <- read.table(new_tsg145_file, strip.white = T, header =T)
+subset(new_tsg145, GeneID %in% setdiff(new_tsg145$GeneID, table_HGNC$Entrez.Gene))
 new_tsg145 <- merge(new_tsg145[c("GeneID")], table_HGNC[c("Approved.Symbol", "Entrez.Gene", "UniProt.ID")], by.x = "GeneID", by.y = "Entrez.Gene")
 #remove the ones without UniProt
 new_tsg145 <- subset(new_tsg145, UniProt.ID!="")
@@ -87,15 +94,15 @@ rm(table_smg260_file)
 # #  Giovanni Pan-Can paper significant function event (SFE)
 # # -------------------------------------------------------------------------------------
 
-table_sfe <- read.delim(file=table_sfe_file)
-colnames(table_sfe)[1] <- "Gene"
-table_sfe$Gene[table_sfe$Gene=='MLL2'] <- 'KMT2D'
-table_sfe$Gene[table_sfe$Gene=='SFRS2'] <- 'SRSF2'
-setdiff(table_sfe$Gene, c(table_cgc500$Approved.Symbol, table_tsg716$Approved.Symbol, table_smg260$gene))
-table_sfe <- subset(table_sfe, hotspot_count >=3 & Variant_Classification !="Silent")
-table_sfe$var_uid <- apply(table_sfe[c("Gene", "ONCOTATOR_PROTEIN_CHANGE")], 1, function(x) paste0(x, collapse="-"))
-table_sfe <- table_sfe[!duplicated(table_sfe$var_uid),]
-rm(table_sfe_file)
+#table_sfe <- read.delim(file=table_sfe_file)
+#colnames(table_sfe)[1] <- "Gene"
+#table_sfe$Gene[table_sfe$Gene=='MLL2'] <- 'KMT2D'
+#table_sfe$Gene[table_sfe$Gene=='SFRS2'] <- 'SRSF2'
+#setdiff(table_sfe$Gene, c(table_cgc500$Approved.Symbol, table_tsg716$Approved.Symbol, table_smg260$gene))
+#table_sfe <- subset(table_sfe, hotspot_count >=3 & Variant_Classification !="Silent")
+#table_sfe$var_uid <- apply(table_sfe[c("Gene", "ONCOTATOR_PROTEIN_CHANGE")], 1, function(x) paste0(x, collapse="-"))
+#table_sfe <- table_sfe[!duplicated(table_sfe$var_uid),]
+#rm(table_sfe_file)
 
 # -------------------------------------------------------------------------------------
 # Various Gene familis from HGNC
@@ -144,7 +151,7 @@ miRNA <- c("DICER1", "AGO1", "AGO2", "TARBP2", "DROSHA")
 # manual literature curation
 LIT <- c("BCORL1", "PRDM5", "DNMT1","DNMT3B", "HAND2", "ADAMTS15", "FGFR4",
               "HIST1H1B", "HIST1H1C", "ELP4", "BAG6", "CHD1", "CHD2","PIK3R2", "TRIP12", 
-               "BUB1", "BUB3","LZTR1", "PLCG1", "SYNE1", 
+               "BUB1", "BUB3","LZTR1", "SYNE1", 
               "PREX2", "SOX9", "AMER2", "LDLRAP1", "STMN2", "AGTR2", "ZIM2", "NALCN", "SLC16A4", "MAGEA6", "RPS6KA3", "ROBO2", 
               "HNRNPK", "BRINP3", "KLHL6", "MEF2B", "ACTB", "PCLO", "LRRK2",
               "MTF1", "GALNT1", "TINF2", "WRAP53", "ELANE", "DKC1", "EPCAM" , "FBP1", "JMJD1C", "USP28", "PTPRF", "BRSK1", "AR", "CSF1R")
@@ -175,7 +182,7 @@ rm(BH3, NUA4, PRC2, NURD, SWISNF, mRNA, miRNA, LIT, list_add)
 #             "FAM46C", "FAS", "GATA2", "GATA3", "TNFRSF14", "HNF1A", "RECQL4", "RAD21", "KDM6A", "ARHGAP26")
 
 # -------------------------------------------------------------------------------------
-list_goi <-c(table_tsg716$Approved.Symbol, table_cgc500$Approved.Symbol, table_smg260$gene,  rep_genes$Gene, fam_genes$Gene, grp_genes$Gene, unique(table_sfe$Gene))
+list_goi <-c(table_tsg716$Approved.Symbol, table_cgc500$Approved.Symbol, table_smg260$gene,  rep_genes$Gene, fam_genes$Gene, grp_genes$Gene)
 list_goi <- unique(list_goi)
 list_goi <- data.frame("Gene" =list_goi)
 list_goi$cgc500 <- list_goi$Gene %in% as.character(table_cgc500$Approved.Symbol)
@@ -185,7 +192,7 @@ list_goi$tsg716 <- list_goi$Gene %in% as.character(table_tsg716$Approved.Symbol)
 list_goi$tsg206 <- list_goi$Gene %in% as.character(subset(table_tsg716, High_conf)$Approved.Symbol)
 list_goi$smg260 <- list_goi$Gene %in% table_smg260$gene
 list_goi$smg33 <- list_goi$Gene %in% subset(table_smg260,Discussed.in.text..33.==1)$gene
-list_goi$sfe160 <- list_goi$Gene %in% table_sfe$Gene
+#list_goi$sfe160 <- list_goi$Gene %in% table_sfe$Gene
 list_goi$rep <- list_goi$Gene %in% rep_genes$Gene
 list_goi <- merge(list_goi, rep_genes, by="Gene", all.x=T)
 list_goi$fam <- list_goi$Gene %in% fam_genes$Gene
@@ -195,7 +202,7 @@ list_goi <- merge(list_goi, grp_genes, by="Gene", all.x=T)
 
 
 #get the full name
-list_goi <- merge(list_goi, table_HGNC[c("Approved.Symbol", "Approved.Name", "Entrez.Gene", "UniProt.ID", "Ensembl.ID", "Locus.Type", "Locus.Group")], by.x = "Gene", by.y = "Approved.Symbol")
+list_goi <- merge(list_goi, table_HGNC[c("Approved.Symbol", "Approved.Name", "Entrez.Gene", "UniProt.ID", "Ensembl.ID", "CCDS.IDs", "Locus.Type", "Locus.Group")], by.x = "Gene", by.y = "Approved.Symbol")
 
 # remove RNA genes and pseudogene
 print( subset(list_goi, Locus.Group!= "protein-coding gene" ))
@@ -206,7 +213,7 @@ list_goi$Locus.Group <- NULL
 # remove clusters
 list_goi <- subset(list_goi, ! Gene %in% c("IGH", "IGL", "IGK", "TRA", "TRB", "TRD", "HLA-A", "HLA-B"))
 
-rm(fam_genes, grp_genes, rep_genes, table_cgc500, table_sfe, table_smg260, table_tsg716)
+rm(fam_genes, grp_genes, rep_genes, table_cgc500, table_smg260, table_tsg716)
 #list_goi$s200[list_goi$Gene %in% list_s200_ext] <- TRUE 
 #list_goi$s200[list_goi$Gene %in% list_s200_exc] <- FALSE
 
@@ -240,7 +247,7 @@ colnames(table_tag700) <- gsub("Symbol", "Gene", colnames(table_tag700))
 # -------------------------------------------------------------------------------------
 #  Cancer Genome Landscape review paper
 # -------------------------------------------------------------------------------------
-require(XLConnect)
+library(XLConnect)
 # 
 table_cgl <- readWorksheet(loadWorkbook(table_cgl_file), sheet=6, startRow=2)
 table_cgl <- subset(table_cgl, !is.na(Classification.))
@@ -257,19 +264,22 @@ colnames(table_cgl2) <- gsub("Gene.Symbol", "Gene", colnames(table_cgl2))
 # -------------------------------------------------------------------------------------
 #  TUSON TSG and OG
 # -------------------------------------------------------------------------------------
-require(XLConnect)
+library(XLConnect)
 # TSG/OG training 
 ref_TUSON <- readWorksheet(loadWorkbook(ref_TUSON_file), sheet=1, startRow=3)
 #MYCL1 -> MYCL
 ref_TUSON$OG <- gsub("MYCL1", "MYCL", ref_TUSON$OG)
 # TSG/OG results
-table_TUSON_tsg <- readWorksheet(loadWorkbook(table_TUSON_file), sheet=1, startRow=3)
+#table_TUSON_tsg <- readWorksheet(loadWorkbook(table_TUSON_file, create=F), sheet=1, startRow=3)
+table_TUSON_tsg <- read.csv(table_TUSON_A_file, skip=2)
 table_TUSON_tsg <- subset(table_TUSON_tsg, TUSON_q_value_TSG< 0.01)
-table_TUSON_og <- readWorksheet(loadWorkbook(table_TUSON_file), sheet=2, startRow=3)
+#table_TUSON_og <- readWorksheet(loadWorkbook(table_TUSON_file, create=F), sheet=2, startRow=3)
+table_TUSON_og <- read.csv(table_TUSON_B_file, skip=2)
 table_TUSON_og <- subset(table_TUSON_og, TUSON_q_value_OG< 0.01)
-table_TUSON_fam <- readWorksheet(loadWorkbook(table_TUSON_file), sheet=4, startRow=3)
+#table_TUSON_fam <- readWorksheet(loadWorkbook(table_TUSON_file, create=F), sheet=4, startRow=3)
+table_TUSON_fam <- read.csv(table_TUSON_D_file, skip=2)
 
-rm(ref_TUSON_file, table_TUSON_file)
+rm(ref_TUSON_file, table_TUSON_A_file, table_TUSON_B_file, table_TUSON_D_file)
 
 # tag700 designation/ Cancer Genome landscape supplimentary / TUSON designation
 list_goi$TSG <- list_goi$Gene %in% c( subset(table_tag700, Category=="Tumor suppressor gene")$Gene, 
@@ -279,9 +289,11 @@ list_goi$OG <- list_goi$Gene %in% c(subset(table_tag700, Category=="Oncogene")$G
                                     subset(table_cgl, Classification.!="TSG")$Gene, subset(table_cgl2, Classification.!="TSG")$Gene,
                                     ref_TUSON$OG, table_TUSON_og$Gene )
 # name contains proto-oncogene
-list_goi$OG[grep("oncogene", list_goi$Approved.Name)] <- T
+#list_goi$OG[grep("oncogene", list_goi$Approved.Name)] <- T
 # hereditary cancer syndrome
 list_goi$HER <- list_goi$Gene %in% table_TUSON_fam$Gene
+# manually add a few genes
+list_goi$HER[list_goi$Gene %in% c("RAD51B", "RAD51C", "RAD51D", "MRE11A", "FAM175A")] <- TRUE
 
 #conflicting
 #SMO, PAX5, ELF3, NOTCH1, NOTCH2, DNMT3A, KLF4, EZH2, TGFB1
@@ -289,7 +301,11 @@ list_goi$HER <- list_goi$Gene %in% table_TUSON_fam$Gene
 list_goi$Cat <- apply(list_goi[c("TSG", "OG")], 1, function(x) ifelse(x[1], "TSG", ifelse(x[2], "OG", "OTHER")))
 list_goi$Cat[list_goi$Gene %in% c("SMO", "PAX5", "ELF3", "NOTCH1", "NOTCH2", "DNMT3A", "KLF4", "EZH2", "TGFB1", "ERBB4", "RHOB")] <- "DUAL"
 list_goi$TSG <- NULL
+list_goi$OG <- NULL
 list_goi$ONCO <- NULL
+# get gene membership in the different sources
+list_goi$mem <- mapply(function(cgc, smg, tsg, rep){ifelse(cgc, "CGC", ifelse(smg, "SMG", ifelse(tsg, "TSG", ifelse(rep, "REP","OTHER"))))}, list_goi$cgc500, list_goi$smg260, list_goi$tsg716, list_goi$rep)
+list_goi$mem <- factor(list_goi$mem, levels=c("CGC", "SMG", "TSG", "REP", "OTHER"))
 rm(table_tag700, table_tag700_file, table_tag700_in, table_tag700_out, tmp, table_TUSON_tsg, table_TUSON_og, ref_TUSON, table_TUSON_fam, table_cgl, table_cgl2)
 
 # output
@@ -307,6 +323,9 @@ library(GenomicFeatures)
 supportedUCSCtables()
 hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
 save(hg19.refgene.tx, file="Results/hg19_refgene_tx.RData")
+
+
+list_goi_exons<-exons(tmp, list(gene_id = list_goi$Ensembl.ID),columns=c("gene_id","exon_id"))
 
 #write exons
 list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
@@ -339,4 +358,4 @@ writeBed <- function(to_write, outfile){
 }
 writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
 
-
+}

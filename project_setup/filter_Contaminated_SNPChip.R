@@ -63,7 +63,7 @@ solid_cnv <- cnv_trans[rownames(cnv_trans) %in% subset(manifest, Tissue=="11")$f
 
 #blood_cnv <- cnv_trans[rownames(cnv_trans) %in% subset(manifest, Tissue=="10")$filename, ]
 
-require(rrcov)
+library(rrcov)
 # fit the solid tissue
 solid_pca<-PcaHubert(solid_cnv, scale=T, mcd=T, trace=T, alpha=0.75, k=1)
 #screeplot(solid_pca)
@@ -81,7 +81,7 @@ print(attributes(solid_pca)$cutoff.sd)
 print('filtered out samples')
 print(sum(!solid_df$flag))
 
-write.table(solid_df, quote=F, row.names=F, sep = "\t", file="output/SNPChip_solid_flagged.tsv" )
+write.table(solid_df, quote=F, row.names=F, sep = "\t", file="Output/SNPChip_solid_flagged.tsv" )
 #solid_flagged<-arrange(subset(solid_df, od>attributes(solid_pca)$cutoff.od|sd>attributes(solid_pca)$cutoff.sd), study)
 # include anything where V4>0
 #misses<-setdiff(rownames(solid_cnv[solid_cnv$V4>0,]), solid_flagged$filename)
