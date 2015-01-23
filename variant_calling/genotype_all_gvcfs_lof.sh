@@ -55,28 +55,26 @@ Map_file='/home/rj67/seq/Mapability/wgEncodeCrgMapabilityAlign75mer_exome.bedGra
 #  -L $bed_prefix.$chr.bed
 
 # split multiallelic variants, put into GT vcf file.
-cat $out_dir/$project.$chr.vcf | vcfAnnoAlt.py | sed '1,/^##/d' | \
-  vcfbreakmulti | $BCFTOOLS_PATH/bcftools norm -f $REF_PATH/human_g1k_v37.fasta -O v - | \
-  $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar varType - | vcfTrimMNP.py  | sed '1,/^##/d' | \
-  vcfkeepgeno - "GT" "AD" "DP" > $out_dir/$project.$chr.GT.vcf
-#
-# remove the genotype information, annotate variant
-$BCFTOOLS_PATH/bcftools view -G $out_dir/$project.$chr.GT.vcf | vcflength | \
-  $JAVA_PATH/java -Xmx4g -jar $SNPEFF_PATH/snpEff.jar  -c $SNPEFF_PATH/snpEff.config  \
-  -noStats -t -no-downstream -no-upstream -no-intergenic -no-utr -no-intron -onlyTr $REF_PATH/list_goi_CCDS_transcript.txt -v GRCh37.75 - | \
-  $SNPEFF_PATH/scripts/vcfEffOnePerLine.pl | grep -v 'EFF=sequence_feature'  | vcfConvSnpEff.py | sed '1,/^##/d' |  \
-  $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar annotate -id $REF_PATH/dbsnp_138.b37.vcf - | \
-  vcfAnnoSTR.py -r $REF_PATH/human_g1k_v37.fasta  | sed '1,/^##/d' | \
-  vcfannotate -b $Map_file -k Mappability > $out_dir/$project.$chr.tmp.vcf
+#cat $out_dir/$project.$chr.vcf | vcfAnnoAlt.py | sed '1,/^##/d' | \
+#  vcfbreakmulti | $BCFTOOLS_PATH/bcftools norm -f $REF_PATH/human_g1k_v37.fasta -O v - | \
+#  $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar varType - | vcfTrimMNP.py  | sed '1,/^##/d' | \
+#  vcfkeepgeno - "GT" "AD" "DP" > $out_dir/$project.$chr.GT.vcf
+##
+## remove the genotype information, annotate variant
+#$BCFTOOLS_PATH/bcftools view -G $out_dir/$project.$chr.GT.vcf | vcflength | \
+#  $JAVA_PATH/java -Xmx4g -jar $SNPEFF_PATH/snpEff.jar  -c $SNPEFF_PATH/snpEff.config  \
+#  -noStats -t -no-downstream -no-upstream -no-intergenic -no-utr -no-intron -onlyTr $REF_PATH/list_goi_CCDS_transcript.txt -v GRCh37.75 - | \
+#  $SNPEFF_PATH/scripts/vcfEffOnePerLine.pl | grep -v 'EFF=sequence_feature'  | vcfConvSnpEff.py | sed '1,/^##/d' |  \
+#  $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar annotate -id $REF_PATH/dbsnp_138.b37.vcf - | \
+#  vcfAnnoSTR.py -r $REF_PATH/human_g1k_v37.fasta  | sed '1,/^##/d' | \
+#  vcfannotate -b $Map_file -k Mappability > $out_dir/$project.$chr.tmp.vcf
 
 # vcfAnnoPfam.py -p $Pfam_file -t $HGNC_file | sed '1,/^##/d' 
 
-# for snp
 #perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --everything --humdiv --no_stats --coding_only --plugin LoF,human_ancestor_fa:/home/rj67/.vep/Plugins/human_ancestor.fa.gz  \
-#  -i  $out_dir/$project.$chr.tmp.vcf -vcf -o STDOUT | vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' > $out_dir/$project.$chr.VAR.vcf
-
-#perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --everything --humdiv --no_stats --plugin LoF,human_ancestor_fa:/home/rj67/.vep/Plugins/human_ancestor.fa.gz  \
-#  -i  $out_dir/$project.$chr.tmp.vcf -vcf -o STDOUT | vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' > $out_dir/$project.$chr.VAR.vcf
+perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --sift b -polyphen b --humdiv --ccds --uniprot  --hgvs --symbol --numbers --canonical --protein --biotype  \
+    --no_stats --coding_only --plugin LoF,human_ancestor_fa:/home/rj67/.vep/Plugins/human_ancestor.fa.gz  -i  $out_dir/$project.$chr.tmp.vcf -vcf -o STDOUT | \
+    vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' > $out_dir/$project.$chr.VAR.vcf
 
 sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$project.$chr.VAR.vcf
 sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$project.$chr.GT.vcf

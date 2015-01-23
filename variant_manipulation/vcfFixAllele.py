@@ -23,6 +23,8 @@ if __name__ == '__main__':
   vcf_reader.infos['length'] = VcfInfo('length', 1, 'Integer', 'length(ALT) - length(REF) for each ALT')
   vcf_reader.infos['VARTYPE'] = VcfInfo('VARTYPE', 1, 'String', 'variant types')
   del vcf_reader.infos['CSQ'] 
+  del vcf_reader.infos['LOF'] 
+  del vcf_reader.infos['NMD'] 
   
   writer = vcf.Writer(sys.stdout, vcf_reader, lineterminator='\n')
   for Record in vcf_reader:
