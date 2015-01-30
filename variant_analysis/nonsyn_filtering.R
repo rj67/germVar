@@ -28,51 +28,65 @@ nonsyn_var <- merge(nonsyn_var, tmp[c("var_uid","Pathogenicity","Cancer", "Note"
 ################################################################
 library(VariantAnnotation)
 # variant info
-nonsyn_VAR <- expand(readVcf(file="./Results/norm_nonsyn.VAR.vcf.gz", "hg19"))
+# nonsyn_VAR <- expand(readVcf(file="./Results/norm_nonsyn.VAR.vcf.gz", "hg19"))
+# 
+# # preprocess
+# nonsyn_VAR <- nonsyn_VAR %>% labelUid  %>%   
+#               subset(., Coding == "CODING" & VARTYPE=="SNP") %>%
+#               subset(., BIOTYPE == "protein_coding" ) %>%
+#               fixSnpEffGene %>%
+#               subset(., Gene %in% list_goi$Gene) %>%
+#               subset(., Impact=="MODERATE") %>%
+#               subset(., Gene==SYMBOL)   %>% 
+#               labelVarUid %>% 
+#               fixVEPCCDS %>% 
+#               labelVEPUid %>% 
+#               convSIFT %>% 
+#               labelAAUid %>% 
+#               labelSite %>% 
+#               reduceCOL 
+
+nonsyn_VAR <- 
 
 # preprocess
-nonsyn_VAR <- nonsyn_VAR %>% labelUid  %>%   
-              subset(., Coding == "CODING" & VARTYPE=="SNP") %>%
-              subset(., BIOTYPE == "protein_coding" ) %>%
-              fixSnpEffGene %>%
-              subset(., Gene %in% list_goi$Gene) %>%
-              subset(., Impact=="MODERATE") %>%
-              subset(., Gene==SYMBOL)   %>% 
-              labelVarUid %>% 
-              fixVEPCCDS %>% 
-              labelVEPUid %>% 
-              convSIFT %>% 
-              labelAAUid %>% 
-              labelSite %>% 
-              reduceCOL 
+nsSNP_VAR <- expand(readVcf(file="./Results/norm_nsSNP.VAR.vcf.gz", "hg19")) %>% labelUid %>%   
+  subset(., !is.na(Coding) & Coding == "CODING" & VARTYPE=="SNP") %>%
+  fixSnpEffGene %>%
+  subset(., Gene %in% list_goi$Gene) %>%
+  subset(., Impact=="MODERATE") %>%
+  labelVarUid %>% 
+  labelSnpEffUid %>%
+  labelAAUid %>% 
+  labelSite %>% 
+  reduceCOL %>%
+  mergeVCF(., list_gff_long[c("Transcript", "strand")], by="Transcript") %>%
+  annoESPX2kG(.)
 
 
-# tally the variants that don't have any CCDS
-as.data.frame(info(nonsyn_VAR)[c("var_uid", "CCDS")]) %>% group_by(var_uid) %>% dplyr::summarise(., num_ccds = length(unique(CCDS[!is.na(CCDS)]))) %>% subset(., num_ccds==0)
-as.data.frame(info(nonsyn_VAR)[c("var_uid", "ccds_id")]) %>% group_by(var_uid) %>% dplyr::summarise(., num_ccds = length(unique(ccds_id[!is.na(ccds_id)]))) %>% subset(., num_ccds==0)
-# keep only CCDS transcript
-nonsyn_VAR <- nonsyn_VAR %>% subset(., !is.na(ccds_id)) %>% subset(., !duplicated(vep_uid)) %>% subset(., grep("missense_variant", Consequence))
 
-# intersect with clinvar/COSMIC/TCGA mutations
-nonsyn_VAR <- subset(nonsyn_VAR, site %in% nonsyn_var$site )
-# use merge to get cosm_vcount, tcga_vcount
-nonsyn_VAR <- mergeVCF(nonsyn_VAR, nonsyn_var[c("var_uid", "cosm_vcount", "tcga_vcount")], by="var_uid")
-#nonsyn_VAR <- mergeVCF(nonsyn_VAR, nonsyn_var[c("var_uid", "cosm_vcount", "cosm_scount", "tcga_vcount", "tcga_scount", "RCVaccession", "PhenotypeIDs", "Origin","ClinicalSignificance", "OtherIDs")], by="var_uid")
-# get the site count from cosm and tcga by merging on site
-nonsyn_VAR <- mergeVCF(nonsyn_VAR, nonsyn_var[c("site", "cosm_scount", "tcga_scount")] %>% subset(., !duplicated(site)), by="site")
+#### get the mutation info
+## intersect with clinvar/COSMIC/TCGA mutations
+nsSNP_VAR <- subset(nsSNP_VAR, site %in% c(cosm_nonsyn$site, clinvar_txt$site ))
+## COSMIC 
+#use merge to get cosm_vcount and cosm_scount
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, cosm_nonsyn[c("var_uid", "cosm_vcount")], by="var_uid")
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, subset(cosm_nonsyn, !duplicated(site))[c("site", "cosm_scount")], by="site")
+## Clinvar
+# flag whether site is mutated in Clinvar
+info(header(nsSNP_VAR))["clin_site",] <- list("0" ,"Flag", "Whether site in clinvar list")
+info(nsSNP_VAR)$clin_site <- info(nsSNP_VAR)$site %in% clinvar_txt$site
 # get the ClinVar annotation by merging on aa_uid 
-nonsyn_VAR <- mergeVCF(nonsyn_VAR, nonsyn_var[c("aa_uid",  "RCVaccession", "PhenotypeIDs", "Origin", "ClinicalSignificance", "OtherIDs")] %>% subset(., !is.na(RCVaccession)) 
-                       %>% arrange(., -nchar(OtherIDs)) %>% subset(., !duplicated(aa_uid)), by="aa_uid")
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, subset(clinvar_txt, !duplicated(aa_uid))[c("aa_uid",  "RCVaccession", "PhenotypeIDs", "ClinicalSignificance", "OtherIDs")], by="aa_uid") 
 
 
 # label whether exact variant match
-info(header(nonsyn_VAR))["var_match",] <- list("0" ,"Flag", "Whether variant in curated list")
-info(nonsyn_VAR)$var_match <- info(nonsyn_VAR)$var_uid %in% nonsyn_var$var_uid
+#info(header(nonsyn_VAR))["var_match",] <- list("0" ,"Flag", "Whether variant in curated list")
+#info(nonsyn_VAR)$var_match <- info(nonsyn_VAR)$var_uid %in% nonsyn_var$var_uid
 # label whether aachange match
-info(header(nonsyn_VAR))["aa_match",] <- list("0" ,"Flag", "Whether amino acid change in curated list")
-info(nonsyn_VAR)$aa_match <- info(nonsyn_VAR)$aa_uid %in% nonsyn_var$aa_uid
+#info(header(nonsyn_VAR))["aa_match",] <- list("0" ,"Flag", "Whether amino acid change in curated list")
+#info(nonsyn_VAR)$aa_match <- info(nonsyn_VAR)$aa_uid %in% nonsyn_var$aa_uid
 # only keep rare variants if not aa_match
-nonsyn_VAR <- subset(nonsyn_VAR, aa_match | AF<=0.02)
+#nonsyn_VAR <- subset(nonsyn_VAR, aa_match | AF<=0.02)
 # fix the origin column
 #info(nonsyn_VAR)$Origin[grep("germline", info(nonsyn_VAR)$Origin)] <- "germline" #anything containing germline is germline
 #info(nonsyn_VAR)$Origin[!info(nonsyn_VAR)$Origin %in% c("germline", "somatic")] <- NA # anythin not germline or somatic, designate NA first
@@ -81,97 +95,130 @@ nonsyn_VAR <- subset(nonsyn_VAR, aa_match | AF<=0.02)
 info(nonsyn_VAR)$Origin <- c("Clinvar","HSMutation")[as.numeric(with(info(nonsyn_VAR), !is.na(tcga_scount)|!is.na(cosm_scount))) +1 ]
 
 # classify the ClinVar
-info(header(nonsyn_VAR))["Clinvar",] <- list("1" ,"String", "Classify clinvar annotation")
-info(nonsyn_VAR)$Clinvar <- sapply(info(nonsyn_VAR)$ClinicalSignificance, function(x) ifelse(is.na(x),"" ,"Patho/Risk"))
-info(nonsyn_VAR)$Clinvar[grepl("uncertain",info(nonsyn_VAR)$ClinicalSignificance,  ignore.case=T  )|
-                           grepl("benign",info(nonsyn_VAR)$ClinicalSignificance,  ignore.case=T  ) ]<-"Conflicting"
-info(nonsyn_VAR)$Clinvar[is.na(info(nonsyn_VAR)$Clinvar)] <- "Unknown"
-info(nonsyn_VAR)$Clinvar <- factor(info(nonsyn_VAR)$Clinvar, levels=c("Patho/Risk", "Conflicting", "Unknown"))
+info(header(nsSNP_VAR))["Clinvar",] <- list("1" ,"String", "Classify clinvar annotation")
+info(nsSNP_VAR)$Clinvar <- sapply(info(nsSNP_VAR)$ClinicalSignificance, function(x) ifelse(is.na(x),"" ,"Patho/Risk"))
+info(nsSNP_VAR)$Clinvar[grepl("uncertain",info(nsSNP_VAR)$ClinicalSignificance,  ignore.case=T  )|
+                           grepl("benign",info(nsSNP_VAR)$ClinicalSignificance,  ignore.case=T  ) ]<-"Conflicting"
+info(nsSNP_VAR)$Clinvar[is.na(info(nsSNP_VAR)$Clinvar)] <- "Unknown"
+info(nsSNP_VAR)$Clinvar <- factor(info(nsSNP_VAR)$Clinvar, levels=c("Patho/Risk", "Conflicting", "Unknown"))
 
 ######################
 # bioinformatic prediction
 ######################
 
 # output for FATHMM variant annotation
-view(info(nonsyn_VAR)[c("ENSP", "vep_aa")])
-fathmm <- read.delim("Results/nonsyn_VAR.annotated.fathmm.disease.tsv", header=T)
-fathmm <- fathmm %>% plyr::rename(., replace = c("Protein.ID"="ENSP",  "Substitution"="AAChange",	"Prediction"="fathmm_pred", "Score"= "fathmm_score"))
-fathmm$fathmm_pred[fathmm$fathmm_pred==""] <- "no weights"
-#fathmm$fathmm_pred <- factor(fathmm$fathmm_pred, levels=c("CANCER", "PASSENGER/OTHER", "no weights"))
-fathmm$fathmm_pred <- factor(fathmm$fathmm_pred, levels=c("DAMAGING", "TOLERATED", "no weights"))
-info(header(nonsyn_VAR))["fathmm_pred",] <- list("1" ,"String", "fathmm prediction")
-info(header(nonsyn_VAR))["fathmm_score",] <- list("1" ,"Float", "fathmm score")
-info(nonsyn_VAR)$fathmm_pred <- fathmm$fathmm_pred
-info(nonsyn_VAR)$fathmm_score <- fathmm$fathmm_score
+# view(info(nonsyn_VAR)[c("ENSP", "vep_aa")])
+# fathmm <- read.delim("Results/nonsyn_VAR.annotated.fathmm.disease.tsv", header=T)
+# fathmm <- fathmm %>% plyr::rename(., replace = c("Protein.ID"="ENSP",  "Substitution"="AAChange",	"Prediction"="fathmm_pred", "Score"= "fathmm_score"))
+# fathmm$fathmm_pred[fathmm$fathmm_pred==""] <- "no weights"
+# #fathmm$fathmm_pred <- factor(fathmm$fathmm_pred, levels=c("CANCER", "PASSENGER/OTHER", "no weights"))
+# fathmm$fathmm_pred <- factor(fathmm$fathmm_pred, levels=c("DAMAGING", "TOLERATED", "no weights"))
+# info(header(nonsyn_VAR))["fathmm_pred",] <- list("1" ,"String", "fathmm prediction")
+# info(header(nonsyn_VAR))["fathmm_score",] <- list("1" ,"Float", "fathmm score")
+# info(nonsyn_VAR)$fathmm_pred <- fathmm$fathmm_pred
+# info(nonsyn_VAR)$fathmm_score <- fathmm$fathmm_score
 
-### unique variant set, different VEP alter variants are ranked by fathmm prediction
-uniq_vep <- as.data.frame(info(nonsyn_VAR)) %>% arrange(., fathmm_pred) %>% subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("vep_uid"))
-nonsyn_VARu <- subset(nonsyn_VAR, vep_uid %in% uniq_vep$vep_uid)
-# annotate ESP X2kG AF
-nonsyn_VARu <- annoESPX2kG(nonsyn_VARu)
-
-View(subset(info(nonsyn_VAR), var_uid %in%  subset(tmp, out!=1)$var_uid)[c("var_uid", "vep_aa", "SIFT", "SIFT_score", "PolyPhen","Cscore", "fathmm_pred", "fathmm_score")])
-
-View(subset(info(nonsyn_VARu), pred_patho=="Deleterious")[c("var_uid", "vep_aa", "SIFT", "SIFT_score", "PolyPhen","Cscore", "fathmm_pred", "fathmm_score")])
+# ### unique variant set, different VEP alter variants are ranked by fathmm prediction
+# uniq_vep <- as.data.frame(info(nonsyn_VAR)) %>% arrange(., fathmm_pred) %>% subset(., !duplicated(var_uid)) %>% dplyr::select(., matches("vep_uid"))
+# nonsyn_VARu <- subset(nonsyn_VAR, vep_uid %in% uniq_vep$vep_uid)
+# # annotate ESP X2kG AF
+# nonsyn_VARu <- annoESPX2kG(nonsyn_VARu)
+# 
+# View(subset(info(nonsyn_VAR), var_uid %in%  subset(tmp, out!=1)$var_uid)[c("var_uid", "vep_aa", "SIFT", "SIFT_score", "PolyPhen","Cscore", "fathmm_pred", "fathmm_score")])
+# 
+# View(subset(info(nonsyn_VARu), pred_patho=="Deleterious")[c("var_uid", "vep_aa", "SIFT", "SIFT_score", "PolyPhen","Cscore", "fathmm_pred", "fathmm_score")])
 
 # antoher one, separates into 3 tiers
 #info(header(nonsyn_VARu))["pred_patho3",] <- list("1" ,"Integer", "Bioinformatic prediction")
 #info(nonsyn_VARu)$pred_patho3 <- as.numeric(info(nonsyn_VARu)$fathmm_pred=="DAMAGING") + as.numeric(info(nonsyn_VARu)$Cscore>17)
 
-
+### CADD
 # output for CADD variant annotation
-writeVcf(nonsyn_VARu, filename="Output/nonsyn_VAR_CADD.txt")
+writeVcf(nsSNP_VAR, filename="Output/nsSNP_VAR_CADD.txt")
 # read back CADD score and merge into info
-CADD <- read.delim("Results/nonsyn_VAR.annotated.CADD.tsv", header=T, skip=1)
+CADD <- read.delim("Results/nsSNP_VAR.annotated.CADD.tsv", header=T, skip=1)
 CADD$uid <- apply(CADD[c("X.Chrom", "Pos", "Ref", "Alt")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
-#CADD <- CADD %>% subset(., Consequence=="NON_SYNONYMOUS") %>% subset(., GeneName %in% list_goi$Gene)
-# four variants are not annotated nsSNP in CADD,  this include , and MYD88 L273P, BRCA1/C64G, ZMYND10/V16G, HNF1A/P291L
+# 2 variants are not annotated nsSNP in CADD,  this include , CLDN23-Pro232Ser, MEF2B-Arg17Trp  
 CADD <- CADD %>% subset(., GeneName %in% list_goi$Gene)
-nonsyn_VARu <- mergeVCF(nonsyn_VARu, CADD[c("uid", "RawScore", "Cscore")], by="uid")
-# set NA CADD score to 0, weirdly, this include EGFR/T790M, MST1/T546M,  CARD11/R170S, CLDN23/V210M, BUB1B/Q935H, BUB1B/L1026P, CDC27/G111D, CDC27/E109D
-info(nonsyn_VARu)$Cscore[is.na(info(nonsyn_VARu)$Cscore)] <- 0
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, CADD[c("uid", "RawScore", "PHRED")], by="uid")
+# set NA CADD score to 0.001,CLDN23-Pro232Ser, MEF2B-Arg17Tr
+info(nsSNP_VAR)$PHRED[is.na(info(nsSNP_VAR)$PHRED)] <- 0.001
 
 
 # output for Mutation Assessor variant annotation
-writeMA(nonsyn_VARu, filename="Output/nonsyn_VAR_MA.txt")
-MutAss <- read.csv("Results/nonsyn_VAR.annotated.MutationAssessor.csv", header=T)
-MutAss$Func..Impact[MutAss$Func..Impact==""] <- "neutral"
-info(nonsyn_VARu)[MutAss$Gene!=info(nonsyn_VARu)$Gene,]
+writeMA(nsSNP_VAR, filename="Output/nsSNP_VAR_MA.txt")
+MutAss <- read.csv("Results/nsSNP_VAR.annotated.MutationAssessor.csv", header=T)
+#MutAss$Func..Impact[MutAss$Func..Impact==""] <- "neutral"
+## Mutation Assessor has different gene names
+# Gene  AAChange.p	MA_Gene	AA.variant
+# AGO1	Arg88His	EIF2C1	R88H
+# BRINP3	Arg598Trp	FAM5C	R598W
+# ACKR3	Arg161Cys	CXCR7	R161C
+# UVSSA	Ala48Thr	KIAA1530	A48T
+# KDM7A	Arg644Cys	JHDM1D	R644C
+# KMT2C	Ala4490Thr	MLL3	A4433T
+# NUTM2A	Ala160Thr	FAM22A	A88T
+# KDM4E	Arg100Cys	KDM4DL	R100C
+# KMT2A	Leu2368Val	MLL	L2365V
+# KMT2D	Arg4420Trp	MLL2	R4420W
+# ERCC5	Ala874Thr	BIVM-ERCC5	A874T
+# NUTM1	Ser165Phe	C15orf55	S137F
+# SNX29	Val357Leu	RUNDC2A	V204L
+# MEF2B	Arg17Trp	MEF2BNB-MEF2B	R17W
+# CRLF2	Arg215Trp	CRLF2 /// CRLF2	
+# P2RY8	Thr331Met	P2RY8 /// P2RY8	T331M
+# AMER1	Ala29Thr	FAM123B	A29T
+info(nsSNP_VAR)[MutAss$Gene!=info(nsSNP_VAR)$Gene,]
 MutAss[MutAss$Gene!=info(nonsyn_VARu)$Gene,]
-info(header(nonsyn_VARu))["ma_pred",] <- list("1" ,"String", "MutAss prediction")
-info(nonsyn_VARu)$ma_pred <- MutAss$Func..Impact
+info(header(nsSNP_VAR))["ma_pred",] <- list("1" ,"String", "MutAss prediction")
+info(nsSNP_VAR)$ma_pred <- MutAss$Func..Impact
 # combine MutationAssessor and CADD prediction
-info(header(nonsyn_VARu))["pred_patho",] <- list("1" ,"String", "Bioinformatic prediction")
-info(nonsyn_VARu)$pred_patho <- sapply((info(nonsyn_VARu)$ma_pred %in% c("medium","high")) & (info(nonsyn_VARu)$Cscore>17), function(x) ifelse(x, "Deleterious", "Benign"))
-info(nonsyn_VARu)$pred_patho <- factor(info(nonsyn_VARu)$pred_patho, levels=c("Deleterious", "Benign"))
+info(header(nsSNP_VAR))["pred_patho",] <- list("1" ,"String", "Bioinformatic prediction")
+info(nsSNP_VAR)$pred_patho <- sapply((info(nsSNP_VAR)$ma_pred %in% c("medium","high")) & (info(nsSNP_VAR)$PHRED>=20), function(x) ifelse(x, "Deleterious", "Benign"))
+info(nsSNP_VAR)$pred_patho <- factor(info(nsSNP_VAR)$pred_patho, levels=c("Deleterious", "Benign"))
 
 ################################################################
 #       nonsyn Variant GT
 ################################################################
-# Genotype
-nonsyn_GT <- (readVcf(file="./Results/norm_nonsyn.GT.vcf.gz", "hg19"))
-#update both GT and VAR
-nonsyn_GT <- nonsyn_GT  %>% labelUid %>% subset(., uid %in% info(nonsyn_VARu)$uid) 
-nonsyn_VARu <- subset(nonsyn_VARu, uid %in% info(nonsyn_GT)$uid)
-# get the nonsyn_GT variant summary, EAC, EAN, sample AD and AB, etc
-nonsyn_tally <- summaryVCFGT(nonsyn_GT)
-# update nonsyn_VARu with the tallied info
-nonsyn_VARu <- mergeVCF(nonsyn_VARu, nonsyn_tally$tally, by="uid")
+# read in genotype by chromosome
+readChrGT <- function(chr){
+  print(chr)
+  print("read in GT", quote=F)
+  dummy_GT <- (readVcf(file=paste0("./Results/norm_nsSNP.", chr ,".GT.vcf.gz", collapse=""), "hg19"))
+  print("filter GT", quote=F)
+  dummy_GT <- dummy_GT  %>% labelUid %>% subset(., uid %in% info(nsSNP_VAR)$uid) 
+  print("sumamrise GT", quote=F)
+  return(summaryVCFGT(dummy_GT))
+}
+nsSNP_tally <- lapply( c(as.character(seq(1, 22)), "X"), readChrGT )
+# merge the variant tally info
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, do.call(rbind, lapply(nsSNP_tally, function(x) x$tally)))
+# sum up the Genotype
+nsSNP_GT <-  do.call(rbind, lapply(nsSNP_tally, function(x) x$GT))
+# remove mis call entry
+nsSNP_VAR <- subset(nsSNP_VAR, !is.na(EAF))
 
 # for filtering
-nonsyn_VARu <- labelDomiAllele(nonsyn_VARu)
+nsSNP_VAR <- labelDomiAllele(nsSNP_VAR)
 # quality filter 
-nonsyn_VARu <- hardFilter(nonsyn_VARu)
+nsSNP_VAR <- hardFilter(nsSNP_VAR)
+
+# 6 commom variants have AB_med between 0.2~0.25, only CDK11B found in ExAC, other are suspect
+# CDK11B-1571841-A-C
+# NOTCH2-120611960-C-T
+# MST1-49726070-G-A
+# PARP4-25021323-A-G
+# PKD1-2164211-G-A
+# CDC27-45214519-A-G
 
 # park common variants away
-nonsyn_VARu_comm <- subset(nonsyn_VARu, EAF>=0.02 & pass)
+nsSNP_VAR_comm <- subset(nsSNP_VAR, EAF>=0.01 & (X2kG_AF>=0.01 | ESP_AF_>=0.01))
 # now remove common variants from futher consideration
-nonsyn_VARu <- subset(nonsyn_VARu, EAF<0.02)
+nsSNP_VAR <- subset(nsSNP_VAR, !var_uid %in% info(nsSNP_VAR_comm)$var_uid)
 
 # remove two variants that are not in database but common in our data set, not sure if FP
 nonsyn_VARu <- subset(nonsyn_VARu, !var_uid %in% c("RSBN1L-77379331-T-G", "KDM4E-94759020-G-A"))
 nonsyn_VARu <- subset(nonsyn_VARu, pass)
-
 
 # write FP input
 all_uid <- nonsyn_calls@VAR$var_uid
