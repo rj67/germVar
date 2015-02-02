@@ -23,7 +23,7 @@ all_tcga$Day <- as.numeric(substr(all_tcga$upload_date, 9, 10))
 print("after filter")
 print(dim(all_tcga))
 
-bam_paths <- read.table("input/all_bam_exist_Sep_10.list", strip.white=T, stringsAsFactors=F)
+bam_paths <- read.table("input/all_bam_exist_Sep_21.list", strip.white=T, stringsAsFactors=F)
 colnames(bam_paths) <- c("analysis", "SM", "file_path")
 bam_paths$Patient2 <- substr(bam_paths$SM, 6, 12)
 
@@ -39,7 +39,7 @@ all_tcga <- arrange(all_tcga, disease, Patient, ToN, legacy_sample_id, !exist, -
 print(c("number of duplicates", sum(duplicated(all_tcga$legacy_sample_id))))
 
 all_tcga <- all_tcga[!duplicated(all_tcga$legacy_sample_id), ]
-view(subset(all_tcga, !exist))
+View(subset(all_tcga, !exist))
 
 #filter out contaminated solid normals
 solid_df <- read.table(file="output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)
@@ -47,15 +47,15 @@ print(c("number of contaminated samples", nrow(subset(all_tcga, Specimen %in% su
 all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
 
 # manually remove bam files that are actually aligned to HG18
-all_tcga <- subset(all_tcga, !analysis %in% c("fc393f8e-5242-456c-bbcb-7edcadd5968a", "b9620e09-fec8-4533-9495-ab9d3720f9b9",
-"349eeb2b-8f73-4d15-97cb-c2089921f6eb", "d2f523b7-6895-4e54-9b37-ba97d0985b55",
-"721af97c-dff3-487e-97f1-259bbfc3c104", "5695946b-f5ea-458a-85b8-aea7bbd2fceb",
-"71b9ff39-7d3c-459b-baf0-1beaa284629c", "6e82197f-1142-48ab-a933-b255f9d5c514",
-"7d3a79d5-08f3-42a0-9995-318f894d2874", "6246ae12-0e5a-43b7-bd8e-48bb5e48da0b",
-"b5a71869-acbe-4e81-a09b-05b609313521", "6a96f390-47b0-4412-8cf6-ea442ff21c8f",
-"7ca06096-03fd-4ae7-998c-e3a3fdc8226a", "3b210e8d-3071-42bd-8b60-d8e23f99c8c8",
-"45324dd9-ee4d-441f-a5c0-205267213175", "b596f377-c7f3-4bed-bb0c-e8c32a4deee1",
-"31dcd6e7-c89f-4a2d-ae42-9de37de10a2b"))
+#all_tcga <- subset(all_tcga, !analysis %in% c("fc393f8e-5242-456c-bbcb-7edcadd5968a", "b9620e09-fec8-4533-9495-ab9d3720f9b9",
+#"349eeb2b-8f73-4d15-97cb-c2089921f6eb", "d2f523b7-6895-4e54-9b37-ba97d0985b55",
+#"721af97c-dff3-487e-97f1-259bbfc3c104", "5695946b-f5ea-458a-85b8-aea7bbd2fceb",
+#"71b9ff39-7d3c-459b-baf0-1beaa284629c", "6e82197f-1142-48ab-a933-b255f9d5c514",
+#"7d3a79d5-08f3-42a0-9995-318f894d2874", "6246ae12-0e5a-43b7-bd8e-48bb5e48da0b",
+#"b5a71869-acbe-4e81-a09b-05b609313521", "6a96f390-47b0-4412-8cf6-ea442ff21c8f",
+#"7ca06096-03fd-4ae7-998c-e3a3fdc8226a", "3b210e8d-3071-42bd-8b60-d8e23f99c8c8",
+#"45324dd9-ee4d-441f-a5c0-205267213175", "b596f377-c7f3-4bed-bb0c-e8c32a4deee1",
+#"31dcd6e7-c89f-4a2d-ae42-9de37de10a2b"))
 
 
 #check each patient T/N status
@@ -64,13 +64,23 @@ print(table(ToN_stat$status))
 # remove samples where only Tumor sample is available
 all_tcga <- merge(all_tcga, ToN_stat, by="Patient")
 all_tcga <- subset(all_tcga, status !="T")
+all_tcga <- arrange(all_tcga, !disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV"))
 
-write.table(subset(all_tcga, sample_type %in% c(10, 11))[c("analysis", "file_path")], file="output/all_norm_bam_uid.list", sep="\t", row.names=F, col.names=F, quote=F)
+write.table(subset(all_tcga, sample_type %in% c(10, 11) & (!disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV")))[c("analysis", "file_path")], 
+            file="Output/all_norm_bam_uid.list", sep="\t", row.names=F, col.names=F, quote=F)
 write.csv(all_tcga,  file="output/all_tcga.csv", row.names=F, quote=F)
 # tally
 tally_tcga <- dplyr::summarise(group_by(all_tcga, disease, center, refassem_abbr), 
   num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
 print(tally_tcga)
+
+### redefine disease name
+disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))
+all_tcga <- plyr::join(all_tcga, disease_df, by="disease")
+
+## standardize age
+all_tcga <- merge(all_tcga, subset(all_tcga, !duplicated(Patient))[c("Patient", "age", "disease")] %>% group_by(., disease) %>% dplyr::summarise(., std = IQR(age, na.rm=T)/1.349, med = median(age, na.rm=T)))
+all_tcga$agez <- with(all_tcga, (age - med)/std)
 
 #dups <- subset(all_tcga, disease=="LUAD" & duplicated(sample_id))$sample_id
 #View(subset(all_tcga, sample_id %in% dups))

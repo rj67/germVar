@@ -1,0 +1,82 @@
+Project overview
+========================================================
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring web pages (click the **Help** toolbar button for more details on using R Markdown).
+
+When you click the **Knit HTML** button a web page will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r setup, echo=TRUE, results='hide', message=FALSE, cache=FALSE}
+knitr::opts_chunk$set(fig.width=4, fig.height=4)
+options(digits = 4)
+library(ff)
+library(ffbase)
+library(ggthemes)
+library(RColorBrewer)
+setwd("/Users/snafu/Documents/Project/germVar")
+load(file=".RData")
+```
+
+Overview of the sample size and type per study
+```{r overview_google, eval=FALSE, results='asis', echo=FALSE}
+all_tcga_norm <- arrange(subset(all_tcga, ToN=="N"), sample_type)
+all_tcga_norm <- all_tcga_norm[!duplicated(all_tcga_norm$Patient),]
+all_tcga_summary <- dplyr::summarise(group_by(all_tcga_norm, disease, sample_type), sample_size=length(unique(Patient)))
+all_tcga_summary <- reshape(all_tcga_summary, v.names = "sample_size", timevar = "sample_type", idvar="disease", direction= "wide")
+all_tcga_summary$sample_size.11[is.na(all_tcga_summary$sample_size.11)] <- 0
+all_tcga_summary$sample_size <- with(all_tcga_summary, sample_size.10 + sample_size.11)
+suppressPackageStartupMessages(library(googleVis))
+Bar <- gvisBarChart(arrange(all_tcga_summary, -sample_size), yvar=c("sample_size.10", "sample_size.11"), xvar="disease", options=list(width=500, height=700, isStacked=TRUE))
+print(Bar, "chart")
+```
+
+
+```{r sample_overview, eval=TRUE, echo=FALSE, fig.height=6, fig.width=4}
+#p <- ggplot(all_tcga_norm, aes(reorder(disease, disease, length), fill = disease ))+geom_bar(stat = "bin") + coord_flip()
+#p <- p + theme_few() + theme(legend.position="none")
+#p <- p +scale_fill_manual(values=colorRampPalette(brewer.pal(8, "Accent"))(length(unique(all_tcga_norm$disease))))
+#p <- p + theme( axis.text = element_text(size= rel(1.)), axis.title = element_text(size= rel(1.))) + ylab("Sample Size") + xlab("")
+#p
+disease_df <- read.csv("./Results/TCGA_disease_name.csv")
+all_tcga_norm <- arrange(subset(all_tcga, ToN=="N"), sample_type)
+all_tcga_norm <- all_tcga_norm[!duplicated(all_tcga_norm$Patient),]
+all_tcga_norm <- merge(all_tcga_norm, disease_df, by="disease")
+all_tally <- as.data.frame(table(all_tcga_norm$disease_symbol)) %>% plyr::rename(., rep=c("Var1"="disease_symbol")) %>% arrange(., Freq)
+all_tally$disease_symbol <- factor(all_tally$disease_symbol, levels=all_tally$disease_symbol)
+all_tally <- merge(all_tally, subset(disease_df, !duplicated(disease_symbol))[c("disease_symbol", "disease_name")])
+#get_name <- function(x){
+#  return(all_tally$disease_name[all_tally$disease_symbol==x])
+#}
+p <- ggplot(aes(disease_symbol, Freq, label=disease_symbol), data=all_tally) + geom_bar(stat = "identity", fill="darkgrey") + coord_flip()
+p <- p + theme_few() + geom_text(hjust=0, size=2) + scale_x_discrete(labels = c( "BRCA"="Breast", "GBM"="Glioblastoma", "LGG"="Low grade\nGlioma","KICH/KIRC/KIRP"="Kidney", "LUAD" = "Lung\nAdenocarcinoma", "UCEC"="Endometrial",
+    "HNSC"="Head and Neck", "THCA"="Thyroid", "OV"="Ovarian", "SKCM"="Skin", "COAD/READ"="Colorectal", "STAD"="Stomach", "PRAD"="Prostate", "BLCA"="Bladder", "LIHC"="Liver", "CESC"="Cervical",
+    "SARC"="Sarcoma", "PCPG"="Pheochromocytoma\nand Paraganglioma", "ESCA"="Esophageal", "ACC"="Adrenocortical", "PAAD"="Pancreatic", "UCS"="Uterine\nCarcinosarcoma" ))
+p <- p + theme(axis.text= element_text(size=rel(0.5)), axis.title= element_text(size=rel(0.7)))
+p <- p + xlab("") + ylab("Number of normal samples") + scale_y_continuous(limits=c(0,990))
+p <- p +geom_text(aes(x="PAAD", y=750), label="7500 patients\n in total", size=2 )
+p
+ggsave(filename="sample_overview.png",height=5, width=4)
+```
+
+
+Candidate genes
+```{r candidate_gene, eval=FALSE,  echo=FALSE}
+#to_plot <- as.data.frame(table(list_goi$mem))
+#to_plot$Raw <- with(list_goi, c(sum(cgc500), sum(smg260), sum(tsg716), sum(rep), sum(fam|grp)))
+#colnames(to_plot)[1] <- "mem"
+# color by Gene Source
+#p <- ggplot(aes(mem, Freq, fill=mem), data= to_plot) + geom_bar(stat="identity") + theme_few()
+#p <- p +scale_fill_brewer(palette="Set2") + xlab("Gene Source") + ylab("Number of Genes") + theme(legend.position="none") 
+#p <- p + geom_bar(stat="identity", aes(mem, Raw, alpha=0.5) )
+#p
+# color by Gene category
+to_plot <- list_goi
+to_plot$Cat <- factor(to_plot$Cat, levels=c("TSG", "OG", "DUAL", "OTHER" ))
+p <- ggplot(aes(mem), data= to_plot) + theme_few()
+p <- p +scale_fill_brewer(palette="Set2", guide = guide_legend(title = "", label.theme = element_text(angle=0)), labels=c( "TSG", "OG", "Dual", "Unkown")) 
+p <- p + xlab("Gene Source") + ylab("Number of Genes") + theme(legend.position=c(0.8, 0.8))
+p <- p + geom_bar(fill = "grey20", alpha=0.2, color="grey70" )
+p <- p + geom_bar(aes(fill=Cat), data= subset(to_plot, cgc500) ) 
+p
+```
+
+
