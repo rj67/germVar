@@ -1,5 +1,14 @@
 
 ##########################################
+# Low frequency variants in Clinvar
+##########################################
+
+lf_clinvar <- as.data.frame(subset(info(nsSNP_VAR),  EAC>=8 & Clinvar=="Patho/Risk" & Gene %in% subset(list_goi, cgc500)$Gene))
+lf_clinvar <- arrange(subset(lf_clinvar[c("Gene", "Transcript","AAChange.p", "EAC", "PHRED", "ma_pred", "pred_patho", "RCVaccession")]), pred_patho, Gene, PHRED)
+view(subset(lf_clinvar))
+
+
+##########################################
 # LOH
 ##########################################
 LOH_patient <- read.table("Results/ASCAT_out/ploidy_purity.txt")
@@ -44,49 +53,45 @@ seqlengths <- as.data.frame(seqinfo(nonsyn_GT))
 seqlengths$chromosome <- rownames(seqlengths)
 tmp<-merge(tmp, seqlengths[c("chromosome", "seqlengths")], by="chromosome")
 tmp$fraction <- tmp$size/tmp$seqlengths
-#############
-# low ferquency variants
-nonsyn_VARu_lf <- as.data.frame(subset(info(nonsyn_VARu), pass & EAC>=10))
-nonsyn_VARu_lf <- plyr::join(nonsyn_VARu_lf, list_goi, by="Gene") 
 
-lf_genes <- subset(list_goi, Gene%in% nonsyn_VARu_lf$Gene) 
+###########################################################################################
+# low ferquency variants
+nsSNP_VAR_lf <- as.data.frame(subset(info(nsSNP_VAR), pass & EAC>=16)) %>% plyr::join(., list_goi, by="Gene") 
+
 # manual literature curation
 tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
-nonsyn_VARu_lf <- plyr::join(nonsyn_VARu_lf, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
+nsSNP_VAR_lf <- plyr::join(nsSNP_VAR_lf, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
 
 # all the predicted deleterious CGC
-view(arrange(subset(nonsyn_VARu_lf,  pred_patho!="Benign" & mem=="CGC"),!HER)[c("Gene", "AAChange", "pred_patho","Origin", "EAC")])
+#view(arrange(subset(nsSNP_VAR_lf,  pred_patho!="Benign" & mem=="CGC"),!HER)[c("Gene", "AAChange", "pred_patho","Origin", "EAC")])
 
 # all the predicted benignCGC
-View(arrange(subset(nonsyn_VARu_lf,  pred_patho!="Benign" & mem=="CGC"),!HER)[c("Gene", "AAChange", "pred_patho","Origin", "EAC", "Pathogenicity", "ClinicalSignificance", "Note")])
+#View(arrange(subset(nsSNP_VAR_lf,  pred_patho!="Benign" & mem=="CGC"),!HER)[c("Gene", "AAChange", "pred_patho","Origin", "EAC", "Pathogenicity", "ClinicalSignificance", "Note")])
 
 
-View(subset(nonsyn_VARu_lf,  Gene=="BUB1B")[c("uid","Gene", "AAChange", "SIFT", "fathmm_pred","Cscore", "ma_pred","pred_patho","ClinicalSignificance","RCVaccession", "OtherIDs", "EAC", "CAC1", "ESP_AC", "ESP_fAC", "ESP_EA_AC","Cancer", "Note")])
+View(subset(nsSNP_VAR_lf,  Gene=="BUB1B")[c("uid","Gene", "AAChange", "SIFT", "fathmm_pred","Cscore", "ma_pred","pred_patho","ClinicalSignificance","RCVaccession", "OtherIDs", "EAC", "CAC1", "ESP_AC", "ESP_fAC", "ESP_EA_AC","Cancer", "Note")])
 
 ##########################################
 # compare AF with ESP
 ##########################################
-# with ESP_fAC
-nonsyn_VARu_lf <- cbind(nonsyn_VARu_lf, as.data.frame(t(apply(nonsyn_VARu_lf[c("EAC", "EAN", "ESP_fAC", "ESP_fAN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "ESPf", "t.test", "greater"))}))))
-nonsyn_VARu_lf$ESPf.padj <- p.adjust(nonsyn_VARu_lf$ESPf.pval, method="BH") 
 # EA1 with ESP_fAC
-nonsyn_VARu_lf <- cbind(nonsyn_VARu_lf, as.data.frame(t(apply(nonsyn_VARu_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA1", "t.test", "greater"))}))))
-nonsyn_VARu_lf$EA1.padj <- p.adjust(nonsyn_VARu_lf$EA1.pval, method="BH") 
-# EA2 with ESP_fAC
-nonsyn_VARu_lf <- cbind(nonsyn_VARu_lf, as.data.frame(t(apply(nonsyn_VARu_lf[c("CAC2", "CAN2", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA2", "t.test", "greater"))}))))
-nonsyn_VARu_lf$EA2.padj <- p.adjust(nonsyn_VARu_lf$EA2.pval, method="BH") 
+nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf, as.data.frame(t(apply(nsSNP_VAR_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA1", "t.test", "greater"))}))))
+nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf,  do.call(rbind, apply(nsSNP_VAR_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA1" ))})))
+
+nsSNP_VAR_lf$EA1.padj <- p.adjust(nsSNP_VAR_lf$EA1.pval, method="BH") 
 
 # compare with X2kG
-nonsyn_VARu_lf$X2kG_AN <- 5008
-nonsyn_VARu_lf <- cbind(nonsyn_VARu_lf, as.data.frame(t(apply(nonsyn_VARu_lf[c("EAC", "EAN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG", "t.test", "greater"))}))))
-nonsyn_VARu_lf$X2kG.padj <- p.adjust(nonsyn_VARu_lf$X2kG.pval, method="BH") 
+nsSNP_VAR_lf$X2kG_AN <- 5008
+nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf, as.data.frame(t(apply(nsSNP_VAR_lf[c("EAC", "EAN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG", "t.test", "greater"))}))))
+nsSNP_VAR_lf$X2kG.padj <- p.adjust(nsSNP_VAR_lf$X2kG.pval, method="BH") 
  
-lf_table <- subset(nonsyn_VARu_lf, (EA1.padj <0.15 & X2kG.padj<0.2))[c( "EAF", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "var_uid", "AAChange", "EA1.padj", "X2kG.padj")]
+lf_table <- subset(nsSNP_VAR_lf, (EA1.padj <0.15 & X2kG.padj<0.2))[c( "EAF", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "var_uid", "AAChange", "EA1.padj", "X2kG.padj")]
 lf_table <- lf_table %>% mutate( EAF = signif(EAF, 2), CAF1 = signif(CAC1/CAN1, 2), ESP_EA_AF = signif(ESP_EA_AC/ESP_EA_AN, 2), X2kG_AF = signif(X2kG_AF, 2), EA1.padj = signif(EA1.padj, 2), X2kG.padj = signif(X2kG.padj, 2))
 lf_table <- arrange(lf_table[c("Gene", "AAChange", "EAF", "CAF1", "ESP_EA_AF", "X2kG_AF", "EA1.padj", "X2kG.padj", "var_uid")], EA1.padj)
+lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")] <- sapply(lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")], function(x) x*100)
 
 view(lf_table)
-#view(subset(nonsyn_VARu_lf, EA1.padj <0.2 & X2kG.padj<0.2  )[c("AC","EAC", "EAN", "EAF", "CAC1", "CAN1","ESP_AC", "ESP_AN", "ESP_fAC", "ESP_fAN", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "uid", "AAChange", 
+#view(subset(nsSNP_VAR_lf, EA1.padj <0.2 & X2kG.padj<0.2  )[c("AC","EAC", "EAN", "EAF", "CAC1", "CAN1","ESP_AC", "ESP_AN", "ESP_fAC", "ESP_fAN", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "uid", "AAChange", 
 #                                            "ESPf.pval", "EA1.pval","X2kG.padj", "Clinvar", "SIFT", "Cscore", "fathmm_pred", "RCVaccession", "OtherIDs"  )])
 
 ##########################################
@@ -94,21 +99,21 @@ view(lf_table)
 ##########################################
 
 # test RNASeq mrnaz
-nonsyn_VARu_lf$mrnaz.pval <- apply(nonsyn_VARu_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "RNASeq", "mrnaz", "oneWay"))})
-nonsyn_VARu_lf$mrnaz.padj <- p.adjust(nonsyn_VARu_lf$mrnaz.pval , method="BH") 
+nsSNP_VAR_lf$mrnaz.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "RNASeq", "mrnaz", "oneWay"))})
+nsSNP_VAR_lf$mrnaz.padj <- p.adjust(nsSNP_VAR_lf$mrnaz.pval , method="BH") 
 # test log2CNA as continous variable
-nonsyn_VARu_lf$CNA.pval <- apply(nonsyn_VARu_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "CBio_query", "log2CNA", "oneWay"))})
-nonsyn_VARu_lf$CNA.padj <- p.adjust(nonsyn_VARu_lf$CNA.pval , method="BH") 
+nsSNP_VAR_lf$CNA.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "CBio_query", "log2CNA", "oneWay"))})
+nsSNP_VAR_lf$CNA.padj <- p.adjust(nsSNP_VAR_lf$CNA.pval , method="BH") 
 # test disease distribution
-nonsyn_VARu_lf$disease.pval <- apply(nonsyn_VARu_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "all_tcga", "disease", "chisq"))})
-nonsyn_VARu_lf$CNA.padj <- p.adjust(nonsyn_VARu_lf$CNA.pval , method="BH") 
-subset(nonsyn_VARu_lf, mrnaz.pval<0.01 )
+nsSNP_VAR_lf$disease.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "all_tcga", "disease", "chisq"))})
+nsSNP_VAR_lf$CNA.padj <- p.adjust(nsSNP_VAR_lf$CNA.pval , method="BH") 
+subset(nsSNP_VAR_lf, mrnaz.pval<0.01 )
 # save GEN1 RNASeq for nonsyn_analysis.Rmd
 GEN1_RNA <- as.data.frame(subset(RNASeq, Gene=="GEN1"))
 
 # age
-nonsyn_VARu_lf$age.pval <- sapply(nonsyn_VARu_lf$uid, function(x) testPat(x, nonsyn_GT, "all_clin2", "age", "oneWay"))
-nonsyn_VARu_lf$age.padj <- p.adjust(nonsyn_VARu_lf$age.pval , method="BH") 
+nsSNP_VAR_lf$age.pval <- sapply(nsSNP_VAR_lf$uid, function(x) testPat(x, nonsyn_GT, "all_clin2", "age", "oneWay"))
+nsSNP_VAR_lf$age.padj <- p.adjust(nsSNP_VAR_lf$age.pval , method="BH") 
 
 
 pats <- getGTPat("17-56355397-G-A", nonsyn_GT)
