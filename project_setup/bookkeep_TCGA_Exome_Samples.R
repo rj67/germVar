@@ -1,9 +1,13 @@
 
 setwd("/Users/snafu/Documents/Project/germVar")
 
-query_path <- "Input/Sep_10_CGHub_query"
+#query_path <- "Input/Sep_10_CGHub_query"
 
-all_tcga <- do.call(rbind, lapply(list.files(query_path, full.names=T, pattern=".csv"), function(x) read.csv(x, header=T)))
+#all_tcga <- do.call(rbind, lapply(list.files(query_path, full.names=T, pattern=".csv"), function(x) read.csv(x, header=T)))
+all_tcga <- read.csv("Results/Sep_10_CGHub_query.csv", header=T)
+all_tcga2 <- read.csv("Results/Jan_05_CGHub_query.csv", header=T)
+all_tcga <- rbind(all_tcga, subset(all_tcga2,  !analysis %in% all_tcga$analysis))
+rm(all_tcga2)
 
 print("raw cgquery")
 print(dim(all_tcga))
@@ -23,28 +27,30 @@ all_tcga$Day <- as.numeric(substr(all_tcga$upload_date, 9, 10))
 print("after filter")
 print(dim(all_tcga))
 
-bam_paths <- read.table("input/all_bam_exist_Sep_21.list", strip.white=T, stringsAsFactors=F)
-colnames(bam_paths) <- c("analysis", "SM", "file_path")
-bam_paths$Patient2 <- substr(bam_paths$SM, 6, 12)
+exist_bams <- read.table("Input/Feb_19_freeze_USB.list", strip.white=T, stringsAsFactors=F)
+exist_bams %<>% dplyr::rename( analysis=V1, SM=V2, file_path=V3)
+
 
 # merge tcga dataframe with all existing bam files
-all_tcga <- merge( all_tcga, bam_paths, by ="analysis", all.x=T)
-# remove ~16 samples where the cgquery info dont match up with SM
+all_tcga <- plyr::join( all_tcga, exist_bams, by ="analysis") %>% subset(., !is.na(file_path))
+# extract the Patient name from the SM, but for some LUSC sample, the SM contains LUSC, not the full patient name
+all_tcga$Patient2 <- sapply(all_tcga$SM, function(x) ifelse(grepl("-LUSC-", x), NA, substr(x, 6, 12)), USE.NAMES=F)
+# remove ~16 samples where the cgquery info dont match up with SM, except for one thats pooled-DNA
 print(c("number of samples where cgquery and SM dont match", sum(with(all_tcga, Patient!=Patient2), na.rm=T)))
-all_tcga <- subset(all_tcga, Patient==Patient2)
+all_tcga <- subset(all_tcga, (Patient==Patient2) | grepl("Pooled_DNA", SM) | is.na(Patient2))
 
 # sort by date and remove duplicates
-all_tcga$exist <- all_tcga$analysis %in% bam_paths$analysis
-all_tcga <- arrange(all_tcga, disease, Patient, ToN, legacy_sample_id, !exist, -Year, -Month, -Day)
+#all_tcga$exist <- all_tcga$analysis %in% bam_paths$analysis
+all_tcga <- arrange(all_tcga, disease, Patient, ToN, legacy_sample_id, -Year, -Month, -Day)
 print(c("number of duplicates", sum(duplicated(all_tcga$legacy_sample_id))))
+print(c("number of duplicates", sum(duplicated(all_tcga$SM))))
 
 all_tcga <- all_tcga[!duplicated(all_tcga$legacy_sample_id), ]
-View(subset(all_tcga, !exist))
 
 #filter out contaminated solid normals
-solid_df <- read.table(file="output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)
+solid_df <- read.table(file="Output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)
 print(c("number of contaminated samples", nrow(subset(all_tcga, Specimen %in% subset(solid_df, !flag)$Specimen))))
-all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
+#all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
 
 # manually remove bam files that are actually aligned to HG18
 #all_tcga <- subset(all_tcga, !analysis %in% c("fc393f8e-5242-456c-bbcb-7edcadd5968a", "b9620e09-fec8-4533-9495-ab9d3720f9b9",
@@ -57,22 +63,37 @@ all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
 #"45324dd9-ee4d-441f-a5c0-205267213175", "b596f377-c7f3-4bed-bb0c-e8c32a4deee1",
 #"31dcd6e7-c89f-4a2d-ae42-9de37de10a2b"))
 
-
 #check each patient T/N status
 ToN_stat <- dplyr::summarise(group_by(all_tcga, Patient), status = paste0(unique(ToN),collapse=""))
 print(table(ToN_stat$status))
-# remove samples where only Tumor sample is available
-all_tcga <- merge(all_tcga, ToN_stat, by="Patient")
-all_tcga <- subset(all_tcga, status !="T")
-all_tcga <- arrange(all_tcga, !disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV"))
+# remove samples where only Tumor/Normal sample is available
+all_tcga %<>% merge(., ToN_stat, by="Patient") %>% subset(., status =="NT")
 
 write.table(subset(all_tcga, sample_type %in% c(10, 11) & (!disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV")))[c("analysis", "file_path")], 
             file="Output/all_norm_bam_uid.list", sep="\t", row.names=F, col.names=F, quote=F)
-write.csv(all_tcga,  file="output/all_tcga.csv", row.names=F, quote=F)
+
+write.csv(all_tcga,  file="Output/all_tcga.csv", row.names=F, quote=F)
+
+# write out the normal samples in small batches
+for (disease in unique(all_tcga$disease)){
+  to_write <- subset(all_tcga[all_tcga[["disease"]]==disease,], ToN=="N")
+  N_block <-  round(nrow(to_write)/250, 0)
+  if(N_block==0) N_block <- 1 
+  block_size <- ceiling(nrow(to_write)/N_block)
+  print(c(disease, nrow(to_write), N_block, block_size))
+  for (I in seq(1, N_block)){
+    start <- (I-1)*block_size + 1
+    end <- min(I*block_size, nrow(to_write))
+    out_file <- paste0(c("Output/gvcf_lists/", disease, "_", I, "_gvcf.list"), collapse="")
+    write(paste("/cbio/cslab/home/rj67/vcf/single_gvcfs/", to_write[["analysis"]][start:end], ".raw.gvcf", sep=""), out_file)
+    print(out_file)
+  }
+}
+
 # tally
-tally_tcga <- dplyr::summarise(group_by(all_tcga, disease, center, refassem_abbr), 
-  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
-print(tally_tcga)
+#tally_tcga <- dplyr::summarise(group_by(all_tcga, disease, center, refassem_abbr), 
+#  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
+#print(tally_tcga)
 
 ### redefine disease name
 disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))

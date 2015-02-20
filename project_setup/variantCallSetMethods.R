@@ -53,6 +53,10 @@ labelUid <- function(vcf){
     names(ranges(rowData(vcf))) <- uid;
     info(header(vcf))["uid",] <- list("1" ,"String", "uid")
     info(vcf)$uid <- uid; 
+    info(header(vcf))["POS",] <- list("1" ,"Integer", "POS")
+    info(vcf)$POS <- start(ranges(rowData(vcf))); 
+    info(header(vcf))["CHROM",] <- list("1" ,"String", "CHROM")
+    info(vcf)$CHROM <- as.character(seqnames(rowData(vcf))); 
   }else{
     vcf$uid <- apply(vcf[c("CHROM", "POS", "REF", "ALT")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
   }
@@ -127,10 +131,10 @@ labelVEPUid <- function(vcf, dataset="nonsyn"){
 labelAAUid <- function(vcf){
   if (inherits(vcf, "VCF")){  
     info(header(vcf))["aa_uid",] <- list("1" ,"String", "aa_uid")
-    info(vcf)$aa_uid <- apply(cbind(as.character(info(vcf)$Gene), as.character(info(vcf)$AAChange)), 1, function(x) paste0(x, collapse="-")) ;
+    info(vcf)$aa_uid <- apply(cbind(as.character(info(vcf)$Gene), as.character(info(vcf)$AAChange.p)), 1, function(x) paste0(x, collapse="-")) ;
   }else{
-    if (!all(c("Gene", "AAChange") %in% colnames(vcf))) stop("labelAAUid: vcf missing columns")
-    vcf$aa_uid <- apply(vcf[c("Gene", "AAChange")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+    if (!all(c("Gene", "AAChange.p") %in% colnames(vcf))) stop("labelAAUid: vcf missing columns")
+    vcf$aa_uid <- apply(vcf[c("Gene", "AAChange.p")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
   }
   return(vcf)
 }
@@ -175,16 +179,6 @@ fixSnpEffGene <- function(vcf){
   return(vcf)
 }
 
-#extract Gene name from Clinvar record when GeneSymbol field is empty
-fixClinGene <- function(vcf){
-  Name<-vcf$Name[vcf$GeneSymbol=="-"]
-  refGene <- sapply(Name, function(x) {ref<-strsplit(x, split=":", fixed=T)[[1]][1]; 
-                                       front<- gregexpr("(", ref, fixed=T)[[1]]; 
-                                       end <- gregexpr(")", ref, fixed=T)[[1]]; 
-                                      return(ifelse(front>1 & end >1, substr(ref, front+1, end-1), "-")) })
-  vcf$GeneSymbol[vcf$GeneSymbol=="-"] <- refGene
-  return(vcf)
-}
 
 fixVEPCCDS <- function(vcf){
     if(!exists("CCDS_enst")){
@@ -340,11 +334,14 @@ summaryVCFGT <- function(vcf){
   # remove colnames to save space
   colnames(AD_mat) <- NULL
   # strip matrix rowwise and stack each row into a matrix
-  AD_rows <- apply(AD_mat, 1, function(x) do.call(rbind, c(x)))
+  #AD_rows <- apply(AD_mat, 1, function(x) do.call(rbind, c(x)))
+  AD_rows <- lapply(split(AD_mat, seq(nrow(AD_mat))), function(x) do.call(rbind, c(x)))
   # extract relevant AD using idx
   AD <- mapply(function(AD, idx){ return(cbind(AD[,1], AD[,idx+1] ))}, AD_rows, idx , SIMPLIFY=F)
   AD <- as.data.frame(do.call(rbind, AD))
   colnames(AD) <- c("REF_AD", "ALT_AD")
+  AD$REF_AD <- as.numeric(AD$REF_AD)
+  AD$ALT_AD <- as.numeric(AD$ALT_AD)
   #AD$uid <- rep(rownames(vcf), each = dim(vcf)[2])
   #AD$SM <- rep(colnames(vcf), times = dim(vcf)[1])
   
@@ -447,8 +444,12 @@ mergeVCF <- function(vcf, df, by="uid"){
 #   return(returns)
 # }
 
-varBurden <-function(NAC, AN, CNTR_AC, CNTR_AN, prefix="CNTR", alt="greater"){
+varBurden <-function(x, prefix="CNTR", alt="greater"){
     library(broom)
+    NAC <- x[1]
+    AN <- x[2]
+    CNTR_AC <- x[3]
+    CNTR_AN <- x[4]
     ### first do a ttest
     data1 <- c(rep(1, NAC), rep(0, AN-NAC))
     data2 <- c(rep(1, CNTR_AC),rep(0, CNTR_AN-CNTR_AC))
@@ -489,7 +490,7 @@ writeMA <- function(vcf, filename){
   if(inherits(vcf, "VCF")){
     out <- paste("hg19", info(vcf)$uid, sep=",")
     out <- gsub("-", ",", out)
-    strands <- sapply(info(vcf)$STRAND, function(x)ifelse(x=="1", "+", "-"))
+    strands <- sapply(info(vcf)$strand, function(x)ifelse(x==1, "+", "-"))
     #out <- paste(out, strands, sep=" ")
     #out <- paste(out, info(vcf)$var_uid, sep="\t")
     write(out, filename)
@@ -514,17 +515,17 @@ annoESPX2kG <-  function(vcf){
   anno_df$ESP_AA_AN[is.na(anno_df$ESP_AA_AN)] <- 4406
   # combine ESP_EA with scaled back ESP_AA and X2kG EAS/SAS
   #based on composition EA:4488, AA:455, AS:394, AM:171
-  anno_df <- anno_df %>% mutate(
-    AS_fAN = ESP_EA_AN/11.4,
-    AS_fAC = AS_fAN*(EAS_AF+SAS_AF),
-    AM_fAN = ESP_EA_AN/26.2,
-    AM_fAC = AM_fAN*AMR_AF,
-    AA_fAN = ESP_EA_AN/9.9,
-    AA_fAC = AA_fAN*ESP_AA_AC/ESP_AA_AN,
-    ESP_fAC = round(ESP_EA_AC + AS_fAC + AM_fAC + AA_fAC), 
-    ESP_fAN = round(ESP_EA_AN + AS_fAN + AM_fAN + AA_fAN), 
-  )
-  vcf <- mergeVCF(vcf, anno_df[c("uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC","ESP_EA_AN", "X2kG_AC", "X2kG_AF", "ESP_fAC", "ESP_fAN")], by="uid")
+#   anno_df <- anno_df %>% mutate(
+#     AS_fAN = ESP_EA_AN/11.4,
+#     AS_fAC = AS_fAN*(EAS_AF+SAS_AF),
+#     AM_fAN = ESP_EA_AN/26.2,
+#     AM_fAC = AM_fAN*AMR_AF,
+#     AA_fAN = ESP_EA_AN/9.9,
+#     AA_fAC = AA_fAN*ESP_AA_AC/ESP_AA_AN,
+#     ESP_fAC = round(ESP_EA_AC + AS_fAC + AM_fAC + AA_fAC), 
+#     ESP_fAN = round(ESP_EA_AN + AS_fAN + AM_fAN + AA_fAN), 
+#   )
+  vcf <- mergeVCF(vcf, anno_df[c("uid", "ESP_AC", "ESP_AN", "ESP_AF", "ESP_EA_AC","ESP_EA_AN", "X2kG_AC", "X2kG_AF")], by="uid")
   return(vcf)
 }
 
@@ -539,7 +540,7 @@ sigSymbol <- function(pval) {
 }
 
 # hard filtering
-hardFilter <- function(vcf){
+hardFilter <- function(vcf, vartype="SNP"){
   if (!inherits(vcf, "VCF")){
     stop("object not VCF")
   }else{
@@ -548,18 +549,24 @@ hardFilter <- function(vcf){
     low_mq <- with(var_set, (is.na(ALT_num)| domi_allele ) & ((VARTYPE=="SNP" & MQ <36) | (VARTYPE!="SNP" & MQ <36)))
     high_mqrs <- with(var_set, (is.na(ALT_num)| domi_allele ) & VARTYPE=="SNP" & !is.na(MQRankSum) & MQRankSum < -12.5)
     high_rprs <- with(var_set, (is.na(ALT_num)| domi_allele ) &VARTYPE=="SNP" & !is.na(ReadPosRankSum) & ReadPosRankSum < -8)
-    high_fs <- with(var_set, (is.na(ALT_num)| domi_allele ) & ((VARTYPE=="SNP" & FS > 100) | (VARTYPE!="SNP" & FS > 300 ) ))
-    high_ic <- with(var_set, (is.na(ALT_num)| domi_allele ) & (abs(InbreedingCoeff) > 0.5 & QD < 8))
+    high_fs <- with(var_set, (is.na(ALT_num)| domi_allele ) & ((VARTYPE=="SNP" & SOR > 5) | (VARTYPE!="SNP" & FS > 300 ) ))
+    high_ic <- with(var_set, (is.na(ALT_num)| domi_allele ) & (abs(InbreedingCoeff) > 0.6 & EAC>=10 & CHROM!="X"))
     #high_fs <- with(var_set, (VARTYPE=="SNP" & FS > 60 & is.na(ALT_idx)) | (VARTYPE!="SNP" & FS > 200 & is.na(ALT_idx)))
     #general
     #low_qd <- with(var_set, (is.na(ALT_idx) | ALT_idx ==1)& QD< 1.5)
     low_qd <- with(var_set, ((is.na(ALT_num)| domi_allele ) & QD< 2 )| QD < 1)
     low_ad <- with(var_set, AD_max < 3 | (AD_med <3 & AB_max < 0.3))
-    low_ab <- with(var_set, (STR_match & STR_times >=8 & AC>20 & AB_med < 0.3) | (AC > 20 & AB_med < 0.25) | AB_med < 0.15  )
-    fail_filter <- low_mq | high_mqrs | high_rprs | high_fs | high_ic | low_qd | low_ad | low_ab
-    print(c("number of variants failing filter ", sum(fail_filter)), quote=F)
+    if (vartype=="LoF"){
+      low_ab <- with(var_set, (STR_match & STR_times >=8 & AC>20 & AB_med < 0.3) | (AC > 20 & AB_med < 0.25) | AB_med < 0.15  )
+    }else if(vartype=="SNP"){
+      low_ab <- with(var_set, (AC > 20 & AB_med < 0.2) | AB_med < 0.15  )
+    }
+    fail_filter <- cbind(low_mq, high_mqrs, high_rprs, high_fs, high_ic, low_qd, low_ad, low_ab)
+    print(c("number of variants failing filter ", sum(apply(fail_filter, 1,  any))), quote=F)
     info(header(vcf))["pass",] <- list("0" ,"Flag", "Whether pass hard filter")
-    info(vcf)$pass <- !fail_filter
+    info(vcf)$pass <-  !apply(fail_filter, 1,  any)
+    info(header(vcf))["fail_flags",] <- list("0" ,"String", "what filter failed")
+    info(vcf)$fail_flags <- apply(fail_filter, 1,  function(x) paste0(names(x)[x], collapse="|"))
     return(vcf)
   }
 }  
@@ -619,12 +626,7 @@ writeMAF <- function(x, filename){
   }
 }  
 
-# take variant set and output bed file
-writeBED <- function(vcf, filename){
-  vcf <- vcf[c("CHROM", "POS")]
-  vcf$BEG <- vcf$POS -1
-  write.table(vcf[c("CHROM", "BEG", "POS")], file=filename, quote=F, row.names=F, col.names=F, sep="\t")
-}
+
 # 
 # Output VCF file
 writeVCF <- function(x, filename){
@@ -685,6 +687,9 @@ chisqTestCallSet <- function(df, factor_name, bg=all_tcga, output=T){
 
 getRNASeq <- function(x){
   return(as.data.frame(subset(RNASeq, Gene==x)))
+}
+getCBio <- function(x){
+  return(as.data.frame(subset(CBio_query, Gene==x & Patient %in% all_tcga$Patient)))
 }
 
 oneWayTestCallSet <- function(df, value_name, bg, para=F, output=T){
