@@ -6,14 +6,12 @@
 chr=$1
 
 # I/O
-project='norm_trunc'
+project='norm_nsSNP'
 out_dir='/home/rj67/group/results/Aug_5'
 in_dir='/home/rj67/group/results/merged_gvcf'
-bed_prefix='/home/rj67/group/results/trunc_bed/norm_joint_high'
+bed_prefix='split_bed/nsSNP.MHS_Clinvar'
 
-#out_file=$project.$chr
-out_file='nonsyn.tp53.2'
-
+out_file=$project.$chr
 # reference file
 Map_file='/home/rj67/seq/Mapability/wgEncodeCrgMapabilityAlign75mer_exome.bedGraph' 
 
@@ -52,8 +50,7 @@ $JAVA_PATH/java -Xmx12g \
   -V $in_dir/UCS.merged.gvcf\
   -o $out_dir/$out_file.vcf \
   -nt 1 \
-  -L /home/rj67/tp53.bed
-  #-L $bed_prefix.$chr.bed
+  -L $REF_PATH/$bed_prefix.$chr.bed 
 
 # split multiallelic variants, put into GT vcf file.
 cat $out_dir/$out_file.vcf | vcfAnnoAlt.py | sed '1,/^##/d' | \
@@ -61,22 +58,20 @@ cat $out_dir/$out_file.vcf | vcfAnnoAlt.py | sed '1,/^##/d' | \
   $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar varType - | vcfTrimMNP.py  | sed '1,/^##/d' | \
   vcfkeepgeno - "GT" "AD" "DP" > $out_dir/$out_file.GT.vcf
 
-
 ## remove the genotype information, annotate variant
 $BCFTOOLS_PATH/bcftools view -G $out_dir/$out_file.GT.vcf | vcflength | \
  $JAVA_PATH/java -Xmx4g -jar $SNPEFF_PATH/snpEff.jar  -c $SNPEFF_PATH/snpEff.config  \
-  -noStats -t -no-downstream -no-upstream -no-intergenic -no-utr -no-intron -onlyTr $REF_PATH/list_goi_GRCh37.75_long_transcript.txt -v GRCh37.75 - | \
+  -noStats -t -no-downstream -no-upstream -no-intergenic -no-utr -no-intron -no REGULATION -onlyTr $REF_PATH/list_goi_GRCh37.75_long_transcript.txt -v GRCh37.75 - | \
  $SNPEFF_PATH/scripts/vcfEffOnePerLine.pl | grep -v 'EFF=sequence_feature'  | vcfConvSnpEff.py | sed '1,/^##/d' |  \
  $JAVA_PATH/java -jar $SNPEFF_PATH/SnpSift.jar annotate -id $REF_PATH/dbsnp_138.b37.vcf - | \
- vcfAnnoSTR.py -r $REF_PATH/human_g1k_v37.fasta  | sed '1,/^##/d' | \
- vcfannotate -b $Map_file -k Mappability > $out_dir/$out_file.tmp.vcf
+ vcfannotate -b $Map_file -k Mappability | vcfFixAllele.py | sed '1,/^##/d' >  $out_dir/$out_file.VAR.vcf
 
 # for snp
+#perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --sift b -polyphen b --humdiv --ccds --uniprot  --hgvs --symbol --numbers --canonical --protein --biotype -coding_only \
+#    --no_stats  -i  $out_dir/$out_file.tmp.vcf -vcf -o STDOUT | vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' >  $out_dir/$out_file.VAR.vcf
+
 #perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --everything --humdiv --no_stats --coding_only --plugin LoF,human_ancestor_fa:/home/rj67/.vep/Plugins/human_ancestor.fa.gz  \
 #  -i  $out_dir/$project.$chr.tmp.vcf -vcf -o STDOUT | vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' > $out_dir/$project.$chr.VAR.vcf
 
-#perl $VEP_PATH/variant_effect_predictor.pl --cache --offline --everything --humdiv --no_stats --plugin LoF,human_ancestor_fa:/home/rj67/.vep/Plugins/human_ancestor.fa.gz  \
-#  -i  $out_dir/$project.$chr.tmp.vcf -vcf -o STDOUT | vcfConvVEP.py | sed '1,/^##/d' | vcfFixAllele.py | sed '1,/^##/d' > $out_dir/$project.$chr.VAR.vcf
-
-#sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$project.$chr.VAR.vcf
-#sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$project.$chr.GT.vcf
+sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$out_file.VAR.vcf
+sed -i '1s/^/##fileformat=VCFv4.1\n/' $out_dir/$out_file.GT.vcf
