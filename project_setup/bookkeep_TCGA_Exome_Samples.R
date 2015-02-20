@@ -50,7 +50,7 @@ all_tcga <- all_tcga[!duplicated(all_tcga$legacy_sample_id), ]
 #filter out contaminated solid normals
 solid_df <- read.table(file="Output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)
 print(c("number of contaminated samples", nrow(subset(all_tcga, Specimen %in% subset(solid_df, !flag)$Specimen))))
-all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
+#all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
 
 # manually remove bam files that are actually aligned to HG18
 #all_tcga <- subset(all_tcga, !analysis %in% c("fc393f8e-5242-456c-bbcb-7edcadd5968a", "b9620e09-fec8-4533-9495-ab9d3720f9b9",
@@ -74,12 +74,26 @@ write.table(subset(all_tcga, sample_type %in% c(10, 11) & (!disease%in%c("UCEC",
 
 write.csv(all_tcga,  file="Output/all_tcga.csv", row.names=F, quote=F)
 
-table(subset(all_tcga, ToN=="N")$disease)/252312499
+# write out the normal samples in small batches
+for (disease in unique(all_tcga$disease)){
+  to_write <- subset(all_tcga[all_tcga[["disease"]]==disease,], ToN=="N")
+  N_block <-  round(nrow(to_write)/250, 0)
+  if(N_block==0) N_block <- 1 
+  block_size <- ceiling(nrow(to_write)/N_block)
+  print(c(disease, nrow(to_write), N_block, block_size))
+  for (I in seq(1, N_block)){
+    start <- (I-1)*block_size + 1
+    end <- min(I*block_size, nrow(to_write))
+    out_file <- paste0(c("Output/gvcf_lists/", disease, "_", I, "_gvcf.list"), collapse="")
+    write(paste("/cbio/cslab/home/rj67/vcf/single_gvcfs/", to_write[["analysis"]][start:end], ".raw.gvcf", sep=""), out_file)
+    print(out_file)
+  }
+}
 
 # tally
-tally_tcga <- dplyr::summarise(group_by(all_tcga, disease, center, refassem_abbr), 
-  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
-print(tally_tcga)
+#tally_tcga <- dplyr::summarise(group_by(all_tcga, disease, center, refassem_abbr), 
+#  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
+#print(tally_tcga)
 
 ### redefine disease name
 disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))
