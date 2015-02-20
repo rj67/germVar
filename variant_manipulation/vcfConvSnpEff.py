@@ -20,6 +20,8 @@ if __name__ == '__main__':
   vcf_reader.infos['FunClass'] = VcfInfo('FunClass', 1, 'String', 'Class')
   vcf_reader.infos['CodonChange'] = VcfInfo('CodonChange', 1, 'String', 'Nucleotide Change')
   vcf_reader.infos['AAChange'] = VcfInfo('AAChange', 1, 'String', 'Protein Change')
+  vcf_reader.infos['AAChange.p'] = VcfInfo('AAChange.p', 1, 'String', 'Protein Change')
+  vcf_reader.infos['AAChange.c'] = VcfInfo('AAChange.c', 1, 'String', 'Protein Change')
   vcf_reader.infos['AALength'] = VcfInfo('AALength', 1, 'Integer', 'Protein Length')
   vcf_reader.infos['Gene'] = VcfInfo('Gene', 1, 'String', 'Gene')
   vcf_reader.infos['BioType'] = VcfInfo('BioType', 1, 'String', 'BioType')
@@ -46,18 +48,25 @@ if __name__ == '__main__':
       for i in range(len(snpEff)):
         if not snpEff[i] == '':
           Record.INFO[EFFkeys[i]] = snpEff[i]
-    
+      #if Record.INFO.get('AAChange', False):
+       #   print Record.INFO['AAChange']
+       #   Record.INFO['AAChange.p'] = Record.INFO['AAChange'].split('/')[0][2:]
+       #   Record.INFO['AAChange.c'] = Record.INFO['AAChange'].split('/')[1][2:]
+            
+
     if Record.INFO.get('LOF', False):
       LOF = Record.INFO['LOF'][0].rstrip(")").lstrip("(").split("|")
       Record.INFO['LOF_Gene'] = LOF[0]
       Record.INFO['LOF_N_Transcripts'] = LOF[2]
       Record.INFO['LOF_P_Transcripts'] = LOF[3]
+      Record.INFO['LOF'] = None
     
     if Record.INFO.get('NMD', False):
       NMD = Record.INFO['NMD'][0].rstrip(")").lstrip("(").split("|")
       Record.INFO['NMD_Gene'] = NMD[0]
       Record.INFO['NMD_N_Transcripts'] = NMD[2]
       Record.INFO['NMD_P_Transcripts'] = NMD[3]
+      Record.INFO['NMD'] = None
   
   
     writer.write_record(Record)
