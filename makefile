@@ -43,6 +43,39 @@ tabix_index.sh CosmicCodingMuts.v71.goi.vcf
 #####################################
 for chr in `cut -f 1 nsSNP.MHS_Clinvar.bed | sort | uniq`; do grep -w $chr nsSNP.MHS_Clinvar.bed > nsSNP.MHS_Clinvar.$chr.bed ; done
 
+
+######################################
+#   Single sample Haplotypecaller call in gvcf mode
+#####################################
+#!/bin/sh
+#PBS -N single_gvcf
+#PBS -l mem=13gb,walltime=4:00:00,nodes=1:ppn=1
+#PBS -q batch
+#PBS -j oe
+##PBS -k oe
+cd $PBS_O_WORKDIR
+bam_file=`head -$PBS_ARRAYID /cbio/cslab/home/rj67/bam/Feb_2_later_bam_uid.list | tail -1 | cut -f 2`
+anal_id=`head -$PBS_ARRAYID /cbio/cslab/home/rj67/bam/Feb_2_laterbam_uid.list | tail -1 | cut -f 1`
+out_dir='/cbio/cslab/home/rj67/vcf/single_gvcfs'
+bed_file=$REF_PATH/'candidate_gene_hg19_exons.bed'
+
+haplotypeCaller_gvcf.sh -l=$bam_file -b=$bed_file -o=$out_dir -n=$anal_id
+
+######################################
+#   Merge single gvcf into small batches
+# #####################################
+#PBS -N Combine
+#PBS -l mem=17gb,walltime=8:00:00,nodes=1:ppn=1
+#PBS -q batch
+#PBS -j oe
+##PBS -k oe
+cd $PBS_O_WORKDIR
+studies=(`ls ./gvcf_lists/*.list | cut -f 3 -d "/" | cut -f 1,2 -d "_" `)
+study=${studies[$PBS_ARRAYID]}
+
+/cbio/cslab/home/rj67/local/germVar/variant_calling/combine_gvcfs.sh $study
+
+
 ######################################
 #    Submit variant calling on nsSNP
 #####################################
