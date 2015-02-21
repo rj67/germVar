@@ -75,6 +75,21 @@ study=${studies[$PBS_ARRAYID]}
 
 /cbio/cslab/home/rj67/local/germVar/variant_calling/combine_gvcfs.sh $study
 
+######################################
+#   Genotype the batch merged gvcfs, extract the lof position
+#   # #####################################
+#PBS -N Genotype_batch
+#PBS -l mem=16gb,walltime=8:00:00,nodes=1:ppn=4
+#PBS -q batch
+#PBS -j oe
+##PBS -k oe
+cd $PBS_O_WORKDIR
+studies=(`ls ./gvcf_lists/*.list | cut -f 3 -d "/" | cut -f 1,2 -d "_" `)
+study=${studies[$PBS_ARRAYID]}
+
+/cbio/cslab/home/rj67/local/germVar/variant_calling/genotype_batch_gvcfs.sh $study
+
+
 
 ######################################
 #    Submit variant calling on nsSNP
