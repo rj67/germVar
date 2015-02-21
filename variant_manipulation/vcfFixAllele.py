@@ -22,9 +22,12 @@ if __name__ == '__main__':
   vcf_reader.infos['ALT_idx'] = VcfInfo('ALT_idx', 1, 'String', 'index for the alternative alleles')
   vcf_reader.infos['length'] = VcfInfo('length', 1, 'Integer', 'length(ALT) - length(REF) for each ALT')
   vcf_reader.infos['VARTYPE'] = VcfInfo('VARTYPE', 1, 'String', 'variant types')
-  del vcf_reader.infos['CSQ'] 
-  del vcf_reader.infos['LOF'] 
-  del vcf_reader.infos['NMD'] 
+  if vcf_reader.infos.get('CSQ', False):
+    del vcf_reader.infos['CSQ'] 
+  if vcf_reader.infos.get('LOF', False):
+    del vcf_reader.infos['LOF'] 
+  if vcf_reader.infos.get('NMD', False):
+    del vcf_reader.infos['NMD'] 
   
   writer = vcf.Writer(sys.stdout, vcf_reader, lineterminator='\n')
   for Record in vcf_reader:
