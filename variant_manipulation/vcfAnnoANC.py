@@ -33,16 +33,16 @@ if __name__ == '__main__':
     
     if Record.INFO.get('LoF_filter', False):
       if 'ANC_ALLELE' in Record.INFO['LoF_filter'] :
-        if 'stop_gained' in Record.INFO['EFF'] :
+        if  Record.INFO['VARTYPE'] == 'SNP' :
           
-          phase = int(Record.INFO['CDS_position']) % 3
-          #print phase, Record.INFO['STRAND']
+          phase = int(Record.INFO['CDS_position'].split('|')[0]) % 3
+          strand = Record.INFO['STRAND'].split('|')[0]
     
           # use samtools faidx to extract 
-          if Record.INFO['STRAND'] ==  '-1':
+          if strand ==  '-1':
             ranges = [Record.POS - phase, Record.POS + 2 - phase ]
             pos = (3-phase) % 3
-          elif Record.INFO['STRAND'] ==  '1':
+          elif strand ==  '1':
             ranges = [Record.POS + phase - 2 , Record.POS+ phase ]
             pos = (phase +2) % 3
           
