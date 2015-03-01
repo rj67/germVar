@@ -1,3 +1,5 @@
+nsSNP_VAR <- mergeVCF(nsSNP_VAR, list_goi[c("Gene", "cgc200", "HER", "Cat")], by="Gene")
+
 
 ##########################################
 # Low frequency variants in Clinvar
@@ -56,11 +58,15 @@ tmp$fraction <- tmp$size/tmp$seqlengths
 
 ###########################################################################################
 # low ferquency variants
-nsSNP_VAR_lf <- as.data.frame(subset(info(nsSNP_VAR), pass & EAC>=16)) %>% plyr::join(., list_goi, by="Gene") 
+nsSNP_lf <- as.data.frame(subset(info(nsSNP_VAR), pass & EAF>=0.001)) %>% plyr::join(., list_goi, by="Gene") 
+# rare variants
+nsSNP_rv <- as.data.frame(subset(info(nsSNP_VAR), pass & EAF < 0.001)) %>% plyr::join(., list_goi, by="Gene") 
 
+with(nsSNP_lf, table(pred_patho, Clinvar))
+with(nsSNP_lf, table(Clinvar))
 # manual literature curation
-tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
-nsSNP_VAR_lf <- plyr::join(nsSNP_VAR_lf, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
+#tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
+#nsSNP_VAR_lf <- plyr::join(nsSNP_VAR_lf, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
 
 # all the predicted deleterious CGC
 #view(arrange(subset(nsSNP_VAR_lf,  pred_patho!="Benign" & mem=="CGC"),!HER)[c("Gene", "AAChange", "pred_patho","Origin", "EAC")])
@@ -72,25 +78,41 @@ nsSNP_VAR_lf <- plyr::join(nsSNP_VAR_lf, tmp[c("var_uid","Pathogenicity","Cancer
 View(subset(nsSNP_VAR_lf,  Gene=="BUB1B")[c("uid","Gene", "AAChange", "SIFT", "fathmm_pred","Cscore", "ma_pred","pred_patho","ClinicalSignificance","RCVaccession", "OtherIDs", "EAC", "CAC1", "ESP_AC", "ESP_fAC", "ESP_EA_AC","Cancer", "Note")])
 
 ##########################################
-# compare AF with ESP
+# compare AF with ESP&X2kG, 
 ##########################################
+#lf_VAR <- rbind(nsSNP_VAR_lf[c("uid","Gene","AAChange.p", )], 
+#                as.data.frame(subset(info(trunc_VARu), EAC>=10)[c("uid", "Gene", "AAChange.p", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "EAC", "EAN", "X2kG_AC")]))
 # EA1 with ESP_fAC
-nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf, as.data.frame(t(apply(nsSNP_VAR_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA1", "t.test", "greater"))}))))
-nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf,  do.call(rbind, apply(nsSNP_VAR_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "EA1" ))})))
-
-nsSNP_VAR_lf$EA1.padj <- p.adjust(nsSNP_VAR_lf$EA1.pval, method="BH") 
+nsSNP_fish <- nsSNP_lf[c("uid", "Gene", "AAChange.p", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "EAC", "EAN", "X2kG_AC", "cosm_scount", "Clinvar", "PHRED", "ma_pred")] 
+nsSNP_fish <- cbind(nsSNP_fish, do.call(rbind, apply(nsSNP_lf[c("CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) varBurden(x, "EA1" ))))
+nsSNP_fish$EA1.t.padj <- p.adjust(nsSNP_fish$EA1.t.pval, method="BH") 
+nsSNP_fish$EA1.f.padj <- p.adjust(nsSNP_fish$EA1.f.pval, method="BH") 
 
 # compare with X2kG
-nsSNP_VAR_lf$X2kG_AN <- 5008
-nsSNP_VAR_lf <- cbind(nsSNP_VAR_lf, as.data.frame(t(apply(nsSNP_VAR_lf[c("EAC", "EAN", "X2kG_AC", "X2kG_AN")], 1, function(x) {names(x) <- NULL;do.call(varBurden, c(as.list(x), "X2kG", "t.test", "greater"))}))))
-nsSNP_VAR_lf$X2kG.padj <- p.adjust(nsSNP_VAR_lf$X2kG.pval, method="BH") 
+nsSNP_fish$X2kG_AN <- 5008
+nsSNP_fish <- cbind(nsSNP_fish, do.call(rbind, apply(nsSNP_fish[c("EAC", "EAN", "X2kG_AC", "X2kG_AN")], 1, function(x) varBurden(x, "X2kG" ))))
+nsSNP_fish$X2kG.t.padj <- p.adjust(nsSNP_fish$X2kG.t.pval, method="BH") 
+nsSNP_fish$X2kG.f.padj <- p.adjust(nsSNP_fish$X2kG.f.pval, method="BH") 
  
-lf_table <- subset(nsSNP_VAR_lf, (EA1.padj <0.15 & X2kG.padj<0.2))[c( "EAF", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "var_uid", "AAChange", "EA1.padj", "X2kG.padj")]
-lf_table <- lf_table %>% mutate( EAF = signif(EAF, 2), CAF1 = signif(CAC1/CAN1, 2), ESP_EA_AF = signif(ESP_EA_AC/ESP_EA_AN, 2), X2kG_AF = signif(X2kG_AF, 2), EA1.padj = signif(EA1.padj, 2), X2kG.padj = signif(X2kG.padj, 2))
-lf_table <- arrange(lf_table[c("Gene", "AAChange", "EAF", "CAF1", "ESP_EA_AF", "X2kG_AF", "EA1.padj", "X2kG.padj", "var_uid")], EA1.padj)
-lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")] <- sapply(lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")], function(x) x*100)
+nsSNP_fish <- plyr::join(nsSNP_fish, nsSNP_lf[c("uid", "Gene", "AAChange.p")])
 
-view(lf_table)
+View(subset(nsSNP_fish, uid %in% c("22-29121087-A-G", "16-2168022-C-A", "8-90990521-T-C")))
+to_plot <- subset(nsSNP_lf, uid %in% c("22-29121087-A-G", "16-2168022-C-A", "8-90990521-T-C"))
+to_plot <- mutate(to_plot, TCGA_AF = 100*EAF, TCGA_EA_AF = CAC1/CAN1*100,  X2kG_AF = 100*X2kG_AF, ESP_EA_AF = ESP_EA_AC/ESP_EA_AN*100)[c("Gene", "TCGA_AF", "TCGA_EA_AF","X2kG_AF", "ESP_EA_AF")]
+to_plot <- melt(to_plot)
+to_plot$Gene <- factor(to_plot$Gene, levels=c("CHEK2", "PKD1", "NBN"))
+p <- ggplot(to_plot, aes(Gene, value, fill=variable)) + theme_few() + geom_bar(stat="identity", position="dodge", alpha=0.9, width=0.8)
+p <- p + xlab("") + ylab("Allele frequency(%)") 
+p <- p + scale_x_discrete(labels = c( "CHEK2"="CHEK2/I200T", "PKD1"="PKD1/R324L","NBN"="NBN/I171V"))
+p <- p + scale_fill_brewer(palette="RdYlBu", guide = guide_legend(title=NULL), labels=c("TCGA", "TCGA_EA", "1000G", "ESP_EA")) + theme(legend.position=c(0.8, 0.8))
+p
+ggsave(filename="nsSNP_lf_fisher_AF.png", width=4, height=4)
+
+#lf_table <- subset(nsSNP_VAR_lf, (EA1.padj <0.15 & X2kG.padj<0.2))[c( "EAF", "CAC1", "CAN1", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "var_uid", "AAChange", "EA1.padj", "X2kG.padj")]
+#lf_table <- lf_table %>% mutate( EAF = signif(EAF, 2), CAF1 = signif(CAC1/CAN1, 2), ESP_EA_AF = signif(ESP_EA_AC/ESP_EA_AN, 2), X2kG_AF = signif(X2kG_AF, 2), EA1.padj = signif(EA1.padj, 2), X2kG.padj = signif(X2kG.padj, 2))
+#lf_table <- arrange(lf_table[c("Gene", "AAChange", "EAF", "CAF1", "ESP_EA_AF", "X2kG_AF", "EA1.padj", "X2kG.padj", "var_uid")], EA1.padj)
+#lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")] <- sapply(lf_table[c("EAF", "CAF1", "ESP_EA_AF", "X2kG_AF")], function(x) x*100)
+
 #view(subset(nsSNP_VAR_lf, EA1.padj <0.2 & X2kG.padj<0.2  )[c("AC","EAC", "EAN", "EAF", "CAC1", "CAN1","ESP_AC", "ESP_AN", "ESP_fAC", "ESP_fAN", "ESP_EA_AC", "ESP_EA_AN", "X2kG_AF", "Gene", "uid", "AAChange", 
 #                                            "ESPf.pval", "EA1.pval","X2kG.padj", "Clinvar", "SIFT", "Cscore", "fathmm_pred", "RCVaccession", "OtherIDs"  )])
 
@@ -98,22 +120,34 @@ view(lf_table)
 # expression change
 ##########################################
 
-# test RNASeq mrnaz
-nsSNP_VAR_lf$mrnaz.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "RNASeq", "mrnaz", "oneWay"))})
-nsSNP_VAR_lf$mrnaz.padj <- p.adjust(nsSNP_VAR_lf$mrnaz.pval , method="BH") 
-# test log2CNA as continous variable
-nsSNP_VAR_lf$CNA.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "CBio_query", "log2CNA", "oneWay"))})
-nsSNP_VAR_lf$CNA.padj <- p.adjust(nsSNP_VAR_lf$CNA.pval , method="BH") 
-# test disease distribution
-nsSNP_VAR_lf$disease.pval <- apply(nsSNP_VAR_lf[c("uid", "Gene")], 1, function(x) {names(x) <- NULL;do.call(testVar, c(as.list(x), nonsyn_GT, "all_tcga", "disease", "chisq"))})
-nsSNP_VAR_lf$CNA.padj <- p.adjust(nsSNP_VAR_lf$CNA.pval , method="BH") 
-subset(nsSNP_VAR_lf, mrnaz.pval<0.01 )
-# save GEN1 RNASeq for nonsyn_analysis.Rmd
-GEN1_RNA <- as.data.frame(subset(RNASeq, Gene=="GEN1"))
+nsSNP_mrnaz <- group_by(subset(nsSNP_GT, uid %in% nsSNP_lf$uid), uid) %>% do(mrnaz_test(.))
+nsSNP_mrnaz$padj <- p.adjust(nsSNP_mrnaz$pval , method="BH") 
+nsSNP_mrnaz <- plyr::join(nsSNP_mrnaz, nsSNP_lf[c("uid", "Gene", "AAChange.p")])
 
-# age
-nsSNP_VAR_lf$age.pval <- sapply(nsSNP_VAR_lf$uid, function(x) testPat(x, nonsyn_GT, "all_clin2", "age", "oneWay"))
-nsSNP_VAR_lf$age.padj <- p.adjust(nsSNP_VAR_lf$age.pval , method="BH") 
+nsSNP_cna <- group_by(subset(nsSNP_GT, uid %in% nsSNP_lf$uid), uid) %>% do(cna_test(.))
+nsSNP_cna$padj <- p.adjust(nsSNP_cna$pval , method="BH") 
+
+# plot 
+# save GEN1 RNASeq for nonsyn_analysis.Rmd
+ffload("DataSet_Results/RNASeq_summary.ff")
+GEN1_RNA <- getRNASeq("GEN1")
+GEN1_RNA$VAR <- GEN1_RNA$Patient %in% subset(nsSNP_GT, uid=="2-17962005-C-G")$Patient
+OGG1_RNA <- getRNASeq("OGG1")
+OGG1_RNA$VAR <- OGG1_RNA$Patient %in% subset(nsSNP_GT, uid=="3-9792107-G-A")$Patient
+to_plot<-rbind(GEN1_RNA[c("Gene", "Patient", "mrnaz", "VAR")], OGG1_RNA[c("Gene", "Patient", "mrnaz", "VAR")])
+p <- ggplot(aes(Gene, mrnaz), data=to_plot) + geom_boxplot(outlier.shape=NA, width=0.7) + theme_few()
+p <- p + geom_jitter(data=subset(to_plot, VAR), aes(color=Gene), position = position_jitter(width = .25), size=3, alpha=0.8) 
+p <- p + scale_color_manual(values=c("#f46d43", "#74add1"), labels=c("GEN1/S509W", "OGG1/R46Q"))
+p <- p + xlab("") + ylab("Tumor mRNA level(z-score)") + scale_y_continuous(limits=c(-4., 6.5))
+p <- p + theme(legend.position=c(0.75, 0.85), legend.title = element_blank())
+p
+ggsave(filename="nsSNP_GEN1_OGG1_mrnaz_boxplot.png",height=4., width=4)
+
+##########################################
+# average age
+##########################################
+nsSNP_age <- group_by(subset(nsSNP_GT, uid %in% nsSNP_lf$uid), uid) %>% do(age_test(.))
+nsSNP_age$padj <- p.adjust(nsSNP_age$pval , method="BH") 
 
 
 pats <- getGTPat("17-56355397-G-A", nonsyn_GT)
@@ -129,22 +163,54 @@ p
 # Rare variants
 ##########################################
 
-nonsyn_VARu_rr <- as.data.frame(subset(info(nonsyn_VARu), pass & EAC<10))
 # missing in tumor
 tmp<- read.csv(file="Results/nonsyn_patho_missing_in_tumor.csv", header=T, stringsAsFactors=F)
-tmp$aa_uid <- paste(tmp$Gene,  tmp$AAChange, sep="-")
-tmp <- dplyr::summarise(group_by(tmp, aa_uid), MAC = length(unique(Patient)))
-tmp <- subset(tmp, aa_uid %in% nonsyn_VARu_rr$aa_uid)
-nonsyn_VARu_rr <- plyr::join(nonsyn_VARu_rr, tmp, by="aa_uid")
-subset(nonsyn_VARu_rr, EAC<MAC)[c("uid","aa_uid", "pred_patho", "EAC", "MAC")]
+tmp <- dplyr::summarise(group_by(tmp, var_uid), MAC = length(unique(Patient)))
+tmp <- subset(tmp, var_uid %in% nsSNP_rv$var_uid)
+nsSNP_rv <- plyr::join(nsSNP_rv, tmp, by="var_uid")
+subset(nsSNP_rv, MAC>=EAC*2/3)[c("var_uid", "pred_patho", "EAC", "MAC")]
 # remove MAC==EAC
-nonsyn_VARu_rr <- subset(nonsyn_VARu_rr, EAC!=MAC | is.na(MAC))
-# Gene annotation
-nonsyn_VARu_rr <- plyr::join(nonsyn_VARu_rr, list_goi, by="Gene") 
-nonsyn_VARu_rr$patho <- with(nonsyn_VARu_rr, interaction(Clinvar, pred_patho, drop=T))
+nsSNP_rv <- subset(nsSNP_rv, MAC<EAC*2/3 | is.na(MAC))
+nsSNP_rv <- subset(nsSNP_rv, !Gene %in% c("SF3B1", "U2AF1"))
+
+# 
+table(subset(nsSNP_rv, pred_patho=="tier1" & driver )$Cat)
+table(subset(nsSNP_rv, pred_patho=="tier1" & driver & cosm_acount>=5 )$Cat)
+table(subset(nsSNP_rv, pred_patho=="tier1" & driver & cosm_acount< 5 )$Cat)
+to_plot <- matrix(c(4, 24, 21, 74), 2)
+colnames(to_plot) <- c("")
+rownames(to_plot) <- NULL
+mosaicplot(to_plot, color="white")
+
 # manual literature curation
-tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
-nonsyn_VARu_rr <- plyr::join(nonsyn_VARu_rr, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
+#tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
+#nonsyn_VARu_rr <- plyr::join(nonsyn_VARu_rr, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid")
+
+# all rare variants
+gene_stat <- nsSNP_rv  %>% group_by(., Gene) %>% dplyr::summarise(., N_pat=sum(EAC)) %>% subset(N_pat>=8)
+nsSNP_rv_mrnaz <- nsSNP_GT %>% subset(., uid %in% nsSNP_rv$uid) %>% subset(., Gene %in% gene_stat$Gene) %>% group_by(., Gene) %>% do(mrnaz_test(.))
+# only tier1/2
+gene_stat <- nsSNP_rv %>% subset(., pred_patho!="tier3") %>% group_by(., Gene) %>% dplyr::summarise(., N_pat=sum(EAC)) %>% subset(N_pat>=8)
+nsSNP_rv_mrnaz <- nsSNP_GT %>% subset(., uid %in% subset(nsSNP_rv, pred_patho=="tier1")$uid) %>% subset(., Gene %in% gene_stat$Gene) %>% group_by(., Gene) %>% do(mrnaz_test(.))
+
+nsSNP_rr_mrnaz$padj <- p.adjust(nsSNP_rr_mrnaz$pval , method="BH") 
+
+nsSNP_rv_cna <- nsSNP_GT %>% subset(., uid %in% subset(nsSNP_rv, pred_patho!="tier3")$uid) %>% subset(., Gene %in% gene_stat$Gene) %>% group_by(., Gene) %>% do(cna_test(.))
+nsSNP_rv_cna <- nsSNP_GT %>%   subset(., uid %in% nsSNP_rv$uid) %>% subset(., Gene %in% gene_stat$Gene) %>% group_by(., Gene) %>% do(cna_test(.))
+
+
+nsSNP_mrnaz <- plyr::join(nsSNP_mrnaz, nsSNP_lf[c("uid", "Gene", "AAChange.p")])
+
+driver_RNA <- lapply(unique(subset(nsSNP_rv, driver)$Gene), getRNASeq)
+driver_RNA <- do.call(rbind, driver_RNA)
+tmp<-merge(nsSNP_GT, nsSNP_rv[c("uid", "driver", "Cat", "pred_patho")], by="uid")
+tmp<-merge(tmp, driver_RNA, by=c("Patient", "Gene"))
+
+driver_CBio <- lapply(unique(subset(nsSNP_rv, driver)$Gene), getCBio)
+driver_CBio <- do.call(rbind, driver_CBio)
+tmp<-merge(nsSNP_GT, nsSNP_rv[c("uid", "driver", "Cat", "pred_patho")], by="uid")
+tmp<-merge(tmp, driver_CBio, by=c("Patient", "Gene"))
+
 
 # Oncogene
 OG_pat <- lapply(subset(nonsyn_VARu_rr,  mem=="CGC" &  pred_patho!="Benign" & Cat=="OG" & (ESP_AC+X2kG_AC<=1))$uid, function(x) {Patient <- getVarPat(x, nonsyn_GT); return(data.frame(uid=rep(x, length(Patient)), Patient=Patient))})
@@ -196,16 +262,6 @@ View(subset(nonsyn_VARu_rr, mem=="CGC" & HER)[c("AC","EAC", "EAN", "EAF", "CAC1"
    "Clinvar", "SIFT", "Cscore", "fathmm_pred", "RCVaccession", "OtherIDs"  )])
 
 
-
-# test CBio_query
-tmp<- read.csv(file="Results/nonsyn_variant_pathogenicity_curation.csv", header=T, stringsAsFactors=F)
-to_test <- merge(to_test, tmp[c("var_uid","Pathogenicity","Cancer", "Note")], by="var_uid", all.x=T)
-pvals2 <- mapply(testVar, to_test$uid, to_test$Gene)
-to_test <- cbind(to_test, as.data.frame(t(pvals)))
-to_test$cna_padj <- p.adjust(to_test$cna_pval, method="BH") 
-to_test$mrnaz2_padj <- p.adjust(to_test$mrnaz2_pval, method="BH") 
-
-View(subset(to_test, cna_pval<0.1 | mrnaz2_pval<0.05)[c("uid", "aa_uid", "ClinicalSignificance","SIFT", "Cscore","cna_pval","log2_pval", "mrnaz_pval", "mrnaz2_pval")])
 
 
 testVar <- function(uid, Genex, vcf, data_set, factor="CNA", test="oneWay"){

@@ -95,6 +95,10 @@ for (disease in unique(all_tcga$disease)){
 #  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
 #print(tally_tcga)
 
+####### merge with clinical info
+all_tcga <- plyr::join(all_tcga, all_clin[c("Patient", "age", "EA")], by="Patient")
+all_tcga$EA[is.na(all_tcga$EA)] <- F
+
 ### redefine disease name
 disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))
 all_tcga <- plyr::join(all_tcga, disease_df, by="disease")
@@ -128,3 +132,21 @@ all_tcga$agez <- with(all_tcga, (age - med)/std)
 
 
 rm(bam_paths, tally_tcga, solid_df, ToN_stat)
+
+
+##################################
+## 
+##################################
+tcga_rna <- read.csv("Results/Feb_26_CGHub_RNA.csv", header=T)
+tcga_rna %<>% subset(., !refassem %in% c("NCBI36_BCCAGSC_variant", "unaligned")) %>%
+              subset(., !sample_type %in% c(11, 50)) %>%
+              mutate(., Patient = substr( sample_id, 6, 12), Specimen = substr(sample_id, 6, 16))
+
+exist_rna <- read.table("Input/Feb_26_freeze_RNA.list", strip.white=T, stringsAsFactors=F)
+exist_rna %<>% dplyr::rename( analysis=V1, file_path=V2)
+
+tcga_rna %<>% merge(., exist_rna, by="analysis")
+
+
+
+

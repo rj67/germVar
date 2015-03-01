@@ -67,7 +67,12 @@ labelUid <- function(vcf){
 labelVarUid <- function(vcf){
   if (inherits(vcf, "VCF")){
     info(header(vcf))["var_uid",] <- list("1" ,"String", "var_uid")
-    info(vcf)$var_uid <- apply(cbind(as.character(info(vcf)$Gene), start(ranges(rowData(vcf))), as.character(rowData(vcf)$REF), as.character(rowData(vcf)$ALT)), 1, function(x) paste0(x, collapse="-")) ;
+    if(inherits(vcf, "CollapsedVCF")){
+      ALT <- sapply(rowData(vcf)$ALT, function(x) as.character(x[[1]]))
+    }else{
+      ALT <- as.character(rowData(vcf)$ALT)
+    };
+    info(vcf)$var_uid <- apply(cbind(as.character(info(vcf)$Gene), start(ranges(rowData(vcf))), as.character(rowData(vcf)$REF), ALT), 1, function(x) paste0(x, collapse="-")) ;
   }else{
     if (!all(c("Gene", "POS", "REF", "ALT") %in% colnames(vcf))) stop("vcf missing columns")
     vcf$var_uid <- apply(vcf[c("Gene", "POS", "REF", "ALT")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
@@ -306,7 +311,7 @@ flipCodon <- function(N, strand){
 labelDomiAllele  <- function(vcf){
   info(header(vcf))["domi_allele",] <- list("0" ,"Flag", "Dominant allele")
   info(vcf)$domi_allele <- FALSE
-  info(vcf)$domi_allele[!is.na(info(vcf)$ALT_num)] <- with(subset(info(vcf), !is.na(ALT_num)), 
+  info(vcf)$domi_allele[!is.na(info(vcf)$ALT_num)] <- with(as.data.frame(info(subset(vcf, !is.na(ALT_num)))), 
                                mapply(function(ACs, ALT_idx){AC <- as.numeric(strsplit(ACs, split="|", fixed=T)[[1]]); return(AC[as.numeric(ALT_idx)]/sum(AC)>=0.9) },  ACs_orig, ALT_idx))
   return(vcf)
 }
@@ -323,6 +328,16 @@ getVarPat <- function(uid, vcf){
   Var_Pat <- samples(header(vcf))[grep("1", geno(vcf)$GT[uid,], fixed=T, useBytes=T)] 
   Var_pat <- unique(all_tcga$Patient[all_tcga$SM%in%Var_Pat])
   return(Var_pat)
+}
+
+calcPat <- function(df){
+  df <- arrange(df, -GT)
+  df <- df[!duplicated(df$Patient), ]
+  tally <- data.frame(AC2 = as.integer(sum(df$GT-1)),  AN2 = as.integer(nrow(df)*2),
+                      EAC = as.integer(sum(df$GT[df$EA]-1)), EAN = as.integer(nrow(subset(df, EA))*2 ))
+  tally$AF2 <- tally$AC2/tally$AN2
+  tally$EAF <- tally$EAC/tally$EAN
+  return(tally)
 }
 
 # summarise variant info and variant patient info from vcf_GT
@@ -364,7 +379,7 @@ summaryVCFGT <- function(vcf){
   # refactor Patient so Variant equal 2/3 
   GT$GT <- as.numeric(factor(GT$GT, levels=c("0/0", "0/1", "1/1")))
   # merge with patient info
-  GT <- plyr::join(GT, all_tcga[c("SM", "Patient", "cauca1")], by="SM")
+  GT <- plyr::join(GT, all_tcga[c("SM", "Patient", "EA")], by="SM")
   GT$Patient <- factor(GT$Patient)
   # calculate EAC
   tally1 <- GT %>% group_by(uid) %>% do(calcPat(.))
@@ -399,15 +414,15 @@ summaryJointGT <- function(GT){
   GT$ALT_AD <- mapply(function(idx, AD) {if(is.na(idx)){return(AD[2])}else{return(AD[idx+1])}}, GT$ALT_idx, AD)
   GT$ALT_AD[is.na(GT$ALT_AD)] <- 0
   GT$AB <-  mapply(function(ALT_AD, DP) {if(DP==0){return(0)}else{return(ALT_AD/DP)}}, GT$ALT_AD, GT$DP)    
-  GT <- merge(GT, all_tcga[c("SM", "Patient", "disease", "ToN")], by.x="SAMPLE", by.y="SM")
-  GT$mut_uid <- apply(GT[c("Patient", "var_uid")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
+  GT <- merge(GT, all_tcga[c("SM", "Patient", "disease", "ToN", "sample_type", "analyte", "Specimen")], by.x="SAMPLE", by.y="SM")
+  GT$mut_uid <- apply(GT[c("Patient", "uid")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
   #GT$event_uid <- apply(GT[c("Patient", "Gene")],1, function(x) gsub(" ", "", paste0(x, collapse="-")))
-  var_tally <- dplyr::summarise(group_by(GT, var_uid), NAC = length(unique( mut_uid [is_var & ToN =="N"])), TAC = length(unique( mut_uid [is_var & ToN =="T"])) ,
+  var_tally <- dplyr::summarise(group_by(GT, uid), NAC = length(unique( mut_uid [is_var & ToN =="N"])), TAC = length(unique( mut_uid [is_var & ToN =="T"])) ,
                                    NACq = length(unique( mut_uid [is_var & ToN =="N" & ALT_AD>=3 & AB >= 0.15 ])), 
                                    TACq = length(unique( mut_uid [is_var & ToN =="T" & ALT_AD>=3 & AB >= 0.15 ])) ,
-                                   NALT_AD_med = median(ALT_AD[ToN=="N"]), TALT_AD_med = median(ALT_AD[ToN=="T"]),
-                                   NAB_med = median(AB[ToN=="N"]), TAB_med = median(AB[ToN=="T"]), Nonly = all(ToN=="N"))
-  MUT <- dplyr::summarise(group_by(GT, var_uid, Patient, mut_uid), N_het = any(GT=="0/1"& (DP - ALT_AD) >= 3 & ToN=="N"), 
+                                   NALT_AD_med = median(ALT_AD[ToN=="N"]), TALT_AD_med = median(ALT_AD[ToN=="T" & is_var]),
+                                   NAB_med = median(AB[ToN=="N"]), TAB_med = median(AB[ToN=="T" & is_var]), Nonly = all(ToN=="N"))
+  MUT <- dplyr::summarise(group_by(GT, uid, Patient, mut_uid), N_het = any(GT=="0/1"& (DP - ALT_AD) >= 3 & ToN=="N"), 
                    T_hom = any( AB>=0.7 & DP >= 16), LOH = N_het & T_hom, PIT = any(is_var & ToN=="T") | all(ToN=="N"))
   return(list(tally = var_tally, GT = GT, MUT = MUT))
 }
@@ -550,7 +565,7 @@ hardFilter <- function(vcf, vartype="SNP"){
     high_mqrs <- with(var_set, (is.na(ALT_num)| domi_allele ) & VARTYPE=="SNP" & !is.na(MQRankSum) & MQRankSum < -12.5)
     high_rprs <- with(var_set, (is.na(ALT_num)| domi_allele ) &VARTYPE=="SNP" & !is.na(ReadPosRankSum) & ReadPosRankSum < -8)
     high_fs <- with(var_set, (is.na(ALT_num)| domi_allele ) & ((VARTYPE=="SNP" & SOR > 5) | (VARTYPE!="SNP" & FS > 300 ) ))
-    high_ic <- with(var_set, (is.na(ALT_num)| domi_allele ) & (abs(InbreedingCoeff) > 0.6 & EAC>=10 & CHROM!="X"))
+    high_ic <- with(var_set, (is.na(ALT_num)| domi_allele ) & (abs(InbreedingCoeff) > 0.6 & AF2>=0.01 & CHROM!="X"))
     #high_fs <- with(var_set, (VARTYPE=="SNP" & FS > 60 & is.na(ALT_idx)) | (VARTYPE!="SNP" & FS > 200 & is.na(ALT_idx)))
     #general
     #low_qd <- with(var_set, (is.na(ALT_idx) | ALT_idx ==1)& QD< 1.5)
@@ -575,7 +590,7 @@ reduceCOL <- function(vcf, dataset="nonsyn"){
   if (inherits(vcf, "VCF")){
     if(dataset=="nonsyn"){
       for (coln in c("CCC", "HWP","VariantType", "HaplotypeScore","BioType","HET","HOM","GTNum", "DB", "DS", "END", "RPA", "CANONICAL", "INTRON", "Amino_acids", "Codons", "DISTANCE",
-                     "MNP", "INS", "DEL", "MIXED", "Coding","LoF_info",  "LoF_flags",  "LoF_filter",  "LoF")){
+                     "MNP", "INS", "DEL", "MIXED", "Coding","LOF_Gene", "LOF_NT", "LOF_PT", "NMD_Gene", "NMD_N_Transcripts", "NMD_P_Transcripts","LoF_info",  "LoF_flags",  "LoF_filter",  "LoF")){
         info(vcf)[[coln]] <- NULL }
     }else if (dataset=="trunc"){
       for (coln in c("CCC", "HWP","VariantType", "HaplotypeScore","BioType","HET","HOM","GTNum", "DB", "DS", "END", "RPA", "CANONICAL", "SIFT", "PolyPhen", "Codons", "DISTANCE", "MIXED", "Coding")){
@@ -686,10 +701,23 @@ chisqTestCallSet <- function(df, factor_name, bg=all_tcga, output=T){
 }    
 
 getRNASeq <- function(x){
-  return(as.data.frame(subset(RNASeq, Gene==x)))
+  is.error <- function(x) inherits(x, "try-error")
+  df <- try(subset(RNASeq, Gene==x))
+  if(is.error(df)){
+    return(NULL)
+  }else{
+    return(as.data.frame(df))
+  }
 }
+
 getCBio <- function(x){
-  return(as.data.frame(subset(CBio_query, Gene==x & Patient %in% all_tcga$Patient)))
+  is.error <- function(x) inherits(x, "try-error")
+  df <- try(subset(CBio_query, Gene==x))
+  if(is.error(df)){
+    return(NULL)
+  }else{
+    return( subset(as.data.frame(df), Patient %in% all_tcga$Patient))
+  }
 }
 
 oneWayTestCallSet <- function(df, value_name, bg, para=F, output=T){
@@ -761,9 +789,104 @@ mergeNormSomaGT <- function(x, soma_mut){
   }
 }  
 
-#tmp <- clinvar_calls@GT
-#tmp$log2CNA <- apply(tmp[c("Patient", "Gene")], 1, function(x) ifelse(x[1] %in% rownames(all_cnv), ifelse(x[2] %in% colnames(all_cnv), all_cnv[x[1], x[2]], NA), NA))
-#tmp$mrnaz <- apply(tmp[c("Patient", "Gene")], 1, function(x) ifelse(x[1] %in% rownames(all_mrnaz), ifelse(x[2] %in% colnames(all_mrnaz), all_mrnaz[x[1], x[2]], NA), NA))
+########################################################################################################################
+###           Analysis tools
+########################################################################################################################
+mrnaz_test <- function(df){
+  print(unique(df$Gene))
+  bg <- getRNASeq(unique(df$Gene))  
+  if( is.null(bg)){
+    return( data.frame(N_all = N_all, N_var = 0, effect = 0, std = 0, pval = NA))
+  }else{
+    bg <- subset(bg, !is.na(mrnaz) & med!=0)
+    #bg <- getCBio(unique(df$Gene))  
+    bg <- subset(bg, !is.na(mrnaz) & Patient %in% all_tcga$Patient)
+    # remove NAs and med==0 tissues
+    N_all <- nrow(bg)
+    bg$VAR <- bg$Patient %in% df$Patient
+    N_var <- sum(bg$VAR)
+    if( N_var > 0){
+      lm.mod <- lm( mrnaz ~  VAR, bg) 
+      # get average age diff
+      effect <- broom::tidy(lm.mod)$estimate[broom::tidy(lm.mod)$term=="VARTRUE"]
+      std <- broom::tidy(lm.mod)$std.error[broom::tidy(lm.mod)$term=="VARTRUE"]
+      test <- wilcox.test(subset(bg, VAR)$mrnaz, subset(bg, !VAR)$mrnaz)#, alternative = "less")
+      return( data.frame(N_all = N_all, N_var = N_var, effect = effect, std = std, pval=test$p.value))
+    }else{
+      return( data.frame(N_all = N_all, N_var = 0, effect = 0, std = 0, pval = NA))
+    }
+  }
+}
+
+cna_test <- function(df){
+  bg <- getCBio(unique(df$Gene))  
+  bg <- subset(bg, !is.na(gistic) & Patient %in% all_tcga$Patient)
+  bg$gistic2 <- cut(bg$gistic, breaks=c(-Inf, -1.5, 2.5, Inf), labels=c("-", "0", "+"))
+  # remove NAs and med==0 tissues
+  N_all <- nrow(bg)
+  bg$VAR <- bg$Patient %in% df$Patient
+  N_var <- sum(bg$VAR)
+  if( N_var > 0){
+    bg_tbl <- dplyr::summarise(group_by(bg, gistic2), bg_patient = length(unique(Patient)))
+    df_tbl <- dplyr::summarise(group_by(subset(bg, VAR), gistic2), df_patient = length(unique(Patient)))    
+    conting_tbl <- merge(bg_tbl, df_tbl, all.x=T)
+    conting_tbl$df_patient <- replaZero(conting_tbl$df_patient)
+    conting_tbl$res_patient <- conting_tbl$bg_patient - conting_tbl$df_patient
+    test <- chisq.test(as.matrix(conting_tbl[c("df_patient", "res_patient")]), simulate.p.value=T, B=2000)
+    #return( data.frame(N_all = N_all, N_var = N_var, res.loss= test$residuals[1,1], res.gain= test$residuals[3,1], pval = test$p.value))
+    return( data.frame(N_all = N_all, N_var = N_var, pval = test$p.value))
+  }else{
+    return( data.frame(N_all = N_all, N_var = 0, pval = NA))
+  }
+}
+
+plot_RNASeq <- function(df){
+  library(ggthemes)
+  library(RColorBrewer)
+  bg <- getRNASeq(unique(df$Gene))
+  Patients <- df$Patient
+  # drop diseases with no variant
+  bg <- droplevels(subset(bg, study %in% droplevels(subset(bg, Patient %in% Patients))$study))
+  p <- ggplot(aes(reorder(study, normalized_count, median), sqrt(normalized_count)), data = bg) + geom_boxplot(outlier.shape = NA)
+  p <- p + geom_jitter(aes(color=study), data = subset(bg, Patient %in% Patients))
+  p <- p + theme_few()
+  p <- p + scale_color_manual(values=colorRampPalette(brewer.pal(8, "Set1"))(length(unique(bg$study))), guide="none")
+  p <- p + xlab("study") + ylab("sqrt(Normalized count)")
+  p 
+}
+
+age_test <- function(df){
+  bg <- subset(all_tcga[c("Patient", "agez")], !is.na(agez) & !duplicated(Patient))
+  # remove NAs and med==0 tissues
+  N_all <- nrow(bg)
+  bg$VAR <- bg$Patient %in% df$Patient
+  N_var <- sum(bg$VAR)
+  if( N_var > 0){
+    lm.mod <- lm( agez ~  VAR, bg) 
+    # get average age diff
+    effect <- broom::tidy(lm.mod)$estimate[broom::tidy(lm.mod)$term=="VARTRUE"]
+    std <- broom::tidy(lm.mod)$std.error[broom::tidy(lm.mod)$term=="VARTRUE"]
+    test <- wilcox.test(subset(bg, VAR)$age, subset(bg, !VAR)$age)#, alternative = "less")
+    return( data.frame(N_all = N_all, N_var = N_var, effect = effect, std = std, pval=test$p.value))
+  }else{
+    return( data.frame(N_all = N_all, N_var = 0, effect = 0, std = 0, pval = NA))
+  }
+}
+
+plot_age <- function(df){
+  library(ggthemes)
+  library(RColorBrewer)
+  bg <- subset(all_tcga, !duplicated(Patient))[c("disease", "Patient", "age")]
+  Patients <- df$Patient
+  # drop diseases with no variant
+  bg <- droplevels(subset(bg, disease %in% droplevels(subset(bg, Patient %in% Patients))$disease))
+  p <- ggplot(aes(reorder(disease, age, median), age), data = bg) + geom_boxplot(outlier.shape = NA)
+  p <- p + geom_jitter(aes(color=disease), data = subset(bg, Patient %in% Patients))
+  p <- p + theme_few()
+  p <- p + scale_color_manual(values=colorRampPalette(brewer.pal(8, "Set1"))(length(unique(bg$disease))), guide="none")
+  p <- p + xlab("study") + ylab("age")
+  p 
+}
 
 #var_set <- subset(var_set, (QD >= 1.5&AC<10) | (AC>=10 &QD>=2) )
 
