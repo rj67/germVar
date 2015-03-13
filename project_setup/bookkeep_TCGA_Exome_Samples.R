@@ -48,9 +48,13 @@ print(c("number of duplicates", sum(duplicated(all_tcga$SM))))
 all_tcga <- all_tcga[!duplicated(all_tcga$legacy_sample_id), ]
 
 #filter out contaminated solid normals
-solid_df <- read.table(file="Output/SNPChip_solid_flagged.tsv" , stringsAsFactors=F, header=T)
-print(c("number of contaminated samples", nrow(subset(all_tcga, Specimen %in% subset(solid_df, !flag)$Specimen))))
-#all_tcga <- subset(all_tcga, !Specimen %in% subset(solid_df, !flag)$Specimen)
+#solid_cnv <- read.csv(file="Output/SNPChip_solid_flagged.csv" , stringsAsFactors=T, header=T)l
+load("Results/filter_Solid_Normal.RData")
+print(c("number of contaminated samples", nrow(subset(all_tcga, Specimen %in% subset(solid_cnv, suspect)$Specimen))))
+# get the suspect
+all_tcga$suspect <- with(all_tcga, ToN=="N" & Specimen %in% subset(solid_cnv, suspect)$Specimen)
+# solid normal samples that are not covered
+all_tcga$miss_cnv <- with(all_tcga, ToN=="N" & sample_type==11 & !Specimen %in% solid_cnv$Specimen)
 
 # manually remove bam files that are actually aligned to HG18
 #all_tcga <- subset(all_tcga, !analysis %in% c("fc393f8e-5242-456c-bbcb-7edcadd5968a", "b9620e09-fec8-4533-9495-ab9d3720f9b9",
@@ -69,8 +73,8 @@ print(table(ToN_stat$status))
 # remove samples where only Tumor/Normal sample is available
 all_tcga %<>% merge(., ToN_stat, by="Patient") %>% subset(., status =="NT")
 
-write.table(subset(all_tcga, sample_type %in% c(10, 11) & (!disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV")))[c("analysis", "file_path")], 
-            file="Output/all_norm_bam_uid.list", sep="\t", row.names=F, col.names=F, quote=F)
+#write.table(subset(all_tcga, sample_type %in% c(10, 11) & (!disease%in%c("UCEC","THCA", "COAD", "GBM", "LUAD", "KIRC", "BRCA", "OV")))[c("analysis", "file_path")], 
+#            file="Output/all_norm_bam_uid.list", sep="\t", row.names=F, col.names=F, quote=F)
 
 write.csv(all_tcga,  file="Output/all_tcga.csv", row.names=F, quote=F)
 
@@ -95,12 +99,18 @@ for (disease in unique(all_tcga$disease)){
 #  num_patient=length(unique(participant)), num_sample=length(unique(sample_id)), num_analysis=length(unique(analysis)))
 #print(tally_tcga)
 
+####### merge with clinical info
+load("Results/all_tcga_clinical.RData")
+all_tcga <- plyr::join(all_tcga, all_clin[c("Patient", "age", "EA")], by="Patient")
+all_tcga$EA[is.na(all_tcga$EA)] <- F
+
 ### redefine disease name
-disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))
-all_tcga <- plyr::join(all_tcga, disease_df, by="disease")
+#disease_df <- read.csv("./Results/TCGA_disease_name.csv") %>% plyr::rename(., rep=c("disease_symbol"="disease2"))
+#all_tcga <- plyr::join(all_tcga, disease_df, by="disease")
 
 ## standardize age
-all_tcga <- merge(all_tcga, subset(all_tcga, !duplicated(Patient))[c("Patient", "age", "disease")] %>% group_by(., disease) %>% dplyr::summarise(., std = IQR(age, na.rm=T)/1.349, med = median(age, na.rm=T)))
+all_tcga <- merge(all_tcga, subset(all_tcga, !duplicated(Patient))[c("Patient", "age", "disease")] %>% 
+            group_by(., disease) %>% dplyr::summarise(., std = IQR(as.numeric(age), na.rm=T)/1.349, med = median(as.numeric(age), na.rm=T)))
 all_tcga$agez <- with(all_tcga, (age - med)/std)
 
 #dups <- subset(all_tcga, disease=="LUAD" & duplicated(sample_id))$sample_id
@@ -127,4 +137,22 @@ all_tcga$agez <- with(all_tcga, (age - med)/std)
 #all_tcga_nr <- subset(all_tcga, analysis %in% c(all_exist_uid, all_absent_uid))
 
 
-rm(bam_paths, tally_tcga, solid_df, ToN_stat)
+rm(exist_bams, solid_cnv, ToN_stat, all_clin)
+
+
+##################################
+## 
+##################################
+tcga_rna <- read.csv("Results/Feb_26_CGHub_RNA.csv", header=T)
+tcga_rna %<>% subset(., !refassem %in% c("NCBI36_BCCAGSC_variant", "unaligned")) %>%
+              subset(., !sample_type %in% c(11, 50)) %>%
+              mutate(., Patient = substr( sample_id, 6, 12), Specimen = substr(sample_id, 6, 16))
+
+exist_rna <- read.table("Input/Feb_26_freeze_RNA.list", strip.white=T, stringsAsFactors=F)
+exist_rna %<>% dplyr::rename( analysis=V1, file_path=V2)
+
+tcga_rna %<>% merge(., exist_rna, by="analysis")
+
+
+
+

@@ -15,6 +15,7 @@ table_TUSON_A_file <- "../dataDump/TUSON/mmc3.A.csv"
 table_TUSON_B_file <- "../dataDump/TUSON/mmc3.B.csv"
 table_TUSON_D_file <- "../dataDump/TUSON/mmc3.D.csv"
 table_cgl_file <- "./Gene_List/Vogelstein_Cancer_Genome_Landscapes_1235122TablesS1-4.xls"
+table_driver_file <- "./Gene_List/Vogelstein_Cancer_Genome_Landscapes_1235122TablesS2A.csv"
 
 # -------------------------------------------------------------------------------------
 #  HGNC table, useful for human gene name, gene id, uniprot mapping
@@ -310,58 +311,45 @@ list_goi$HER <- list_goi$Gene %in% table_TUSON_fam$Gene
 # manually add a few genes
 list_goi$HER[list_goi$Gene %in% c("RAD51B", "RAD51C", "RAD51D", "MRE11A", "FAM175A")] <- TRUE
 
+# add the voglestein driver paper
+table_driver <- read.csv(table_driver_file)
+setdiff(table_driver$Gene.Symbol, list_goi$Gene)
+table_driver$Gene.Symbol <- gsub("FAM123B", "AMER1",table_driver$Gene.Symbol)
+table_driver$Gene.Symbol <- gsub("MLL2", "KMT2D",table_driver$Gene.Symbol)
+table_driver$Gene.Symbol <- gsub("MLL3", "KMT2C",table_driver$Gene.Symbol)
+list_goi$driver <- list_goi$Gene %in% table_driver$Gene.Symbol | list_goi$HER
+
 #conflicting
 #SMO, PAX5, ELF3, NOTCH1, NOTCH2, DNMT3A, KLF4, EZH2, TGFB1
 
+
 list_goi$Cat <- apply(list_goi[c("TSG", "OG")], 1, function(x) ifelse(x[1], "TSG", ifelse(x[2], "OG", "OTHER")))
 list_goi$Cat[list_goi$Gene %in% c("SMO", "PAX5", "ELF3", "NOTCH1", "NOTCH2", "DNMT3A", "KLF4", "EZH2", "TGFB1", "ERBB4", "RHOB")] <- "DUAL"
+list_goi$Cat[list_goi$Gene %in% c("RAD51B", "RAD51C", "RAD51D", "MRE11A", "FAM175A")] <- "TSG"
 list_goi$TSG <- NULL
 list_goi$OG <- NULL
 list_goi$ONCO <- NULL
 # get gene membership in the different sources
 list_goi$mem <- mapply(function(cgc, smg, tsg, rep){ifelse(cgc, "CGC", ifelse(smg, "SMG", ifelse(tsg, "TSG", ifelse(rep, "REP","OTHER"))))}, list_goi$cgc500, list_goi$smg260, list_goi$tsg716, list_goi$rep)
 list_goi$mem <- factor(list_goi$mem, levels=c("CGC", "SMG", "TSG", "REP", "OTHER"))
-rm(table_tag700, table_tag700_file, table_tag700_in, table_tag700_out, tmp, table_TUSON_tsg, table_TUSON_og, ref_TUSON, table_TUSON_fam, table_cgl, table_cgl2)
+rm(table_tag700, table_tag700_file, table_tag700_in, table_tag700_out, tmp, table_TUSON_tsg, table_TUSON_og, ref_TUSON, table_TUSON_fam, table_cgl, table_cgl2, table_driver_file, table_driver, table_sfe_file)
 
 # output
 write.table(list_goi, file="Output/candidate_gene_list.tsv", quote=F, row.names=F, sep="\t")
 save(table_HGNC, file="Results/table_HGNC.RData")
 save(list_goi, file="Results/candidate_gene_list.RData")
 
+rm(table_HGNC)
 
 ############## #########################################################
 ##   USE BIOMART to extract relevant Gene, Transcript info
 ############## #########################################################
-library("biomaRt")
-ensembl <- useMart(biomart="ENSEMBL_MART_ENSEMBL", host="feb2014.archive.ensembl.org", path="/biomart/martservice", dataset="hsapiens_gene_ensembl")
-
-### query the GRCh37.75 database using Ensembl.Gene as id
-# only keep protein-coding, remove transcripts on alternative loci
-list_gff <- retrieveEnsemblGFF(ensembl, "ensembl_gene_id", list_goi$Ensembl.Gene) %>% subset(., Biotype=="protein_coding") %>% subset(., !grepl("PATCH", Chrom))
-# check list_goi Gene names are the same
-list_gff <- plyr::join(list_gff, list_goi[c("Ensembl.Gene", "Gene")], by="Ensembl.Gene")
-subset(list_gff, Gene != hgnc_symbol)
-list_gff$hgnc_symbol <- NULL
-# check the genes that dont have any transcript
-subset(list_goi, Gene %in% setdiff(list_goi$Gene, list_gff$Gene))
-
-### query the GRCh37.75 database for Exon coordinates, using transcript id
-list_exons <-  retrieveEnsemblExons(ensembl, list_gff$Transcript) 
-# remove duplicate exon
-list_exons <- subset(list_exons, !duplicated(exon_id)) %>% plyr::join(., list_gff[c("Transcript", "Chrom")], by="Transcript") %>% arrange(., Chrom, exon_chrom_start)
-
-
-# write the exons, remove alternative haplotype, extend exons by 10bp in both direction
-to_write <- list_exons[c("Chrom", "exon_chrom_start", "exon_chrom_end")]
-to_write$exon_chrom_start <- to_write$exon_chrom_start - 10
-to_write$exon_chrom_end <- to_write$exon_chrom_end + 10
-
-writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
 
 retrieveEnsemblGFF <- function(ensembl, query_field, query_ids){
   # what information to get for each transcript:
   sel.attributes=c("ensembl_gene_id", "ensembl_transcript_id", "hgnc_symbol", "chromosome_name", "strand", "start_position","end_position", 
-                   "transcript_start", "transcript_end", "description", "transcript_biotype")
+                   "transcript_start", "transcript_end", "description", "transcript_biotype", "band")
+  #sel.attributes=c("hsapiens_paralog_canonical_transcript_protein", "ensembl_transcript_id")
   # retreive information:
   ensembl_gff <- getBM(attributes=sel.attributes, filters=query_field, value=query_ids, mart=ensembl)
   ## replace attribute names by standardized names
@@ -397,25 +385,58 @@ writeBed <- function(to_write, outfile){
   try(system(command))
 }
 
-if(F){
-library(GenomicFeatures)
-supportedUCSCtables()
-hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
-save(hg19.refgene.tx, file="Results/hg19_refgene_tx.RData")
+library("biomaRt")
+ensembl <- useMart(biomart="ENSEMBL_MART_ENSEMBL", host="feb2014.archive.ensembl.org", path="/biomart/martservice", dataset="hsapiens_gene_ensembl")
 
-#write exons
-list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
-# show Genes that are in alternative haplotype region
-to_write <- Grange2bed(list_goi_exons)
-tmp2 <- to_write[grep("hap", to_write$seqnames),]
-subset(list_goi, Entrez.Gene %in% unique(unlist(tmp2$gene_id)))
-subset(list_goi, Entrez.Gene %in% unique(unlist(subset(tmp, seqnames=="Y")$gene_id)))
+### query the GRCh37.75 database using Ensembl.Gene as id
+# only keep protein-coding, remove transcripts on alternative loci, remove ChrY
+list_gff <- retrieveEnsemblGFF(ensembl, "ensembl_gene_id", list_goi$Ensembl.Gene) %>% subset(., Biotype=="protein_coding") %>% subset(., !grepl("PATCH", Chrom)) %>% 
+  subset(., Chrom!="Y") %>% mutate(., arm = paste(Chrom, substring(band, 1, 1), sep=""))
+# check list_goi Gene names are the same
+list_gff <- plyr::join(list_gff, list_goi[c("Ensembl.Gene", "Gene")], by="Ensembl.Gene")
+subset(list_gff, Gene != hgnc_symbol)
+list_gff$hgnc_symbol <- NULL
+# check the genes that dont have any transcript
+subset(list_goi, Gene %in% setdiff(list_goi$Gene, list_gff$Gene))
 
-#convert Grange object to 
-Grange2bed<-function(GrangeObject){
-  returns<-droplevels(as.data.frame(GrangeObject))
-  returns$seqnames<-sapply(returns$seqnames,function(x) gsub("chr","",x))
-  return(returns)
-}
+### query the GRCh37.75 database for Exon coordinates, using transcript id
+list_exons <-  retrieveEnsemblExons(ensembl, list_gff$Transcript) 
+# add cds_length info to list_gff
+list_gff <- plyr::join(list_gff, subset(list_exons,!duplicated(Transcript))[c("Transcript", "cds_length")], by="Transcript")
+# remove duplicate exon
+list_exons_uniq <- subset(list_exons, !duplicated(exon_id)) %>% plyr::join(., list_gff[c("Transcript", "Chrom")], by="Transcript") %>% arrange(., Chrom, exon_chrom_start)
 
-}
+# write the exons, remove alternative haplotype, extend exons by 10bp in both direction
+to_write <- list_exons_uniq[c("Chrom", "exon_chrom_start", "exon_chrom_end")]
+to_write$exon_chrom_start <- to_write$exon_chrom_start - 10
+to_write$exon_chrom_end <- to_write$exon_chrom_end + 10
+
+writeBed(to_write, "Output/candidate_gene_hg19_exons.bed")
+
+save(list_gff, list_exons, file="Results/candidate_gene_ensembl_gff.RData")
+rm(retrieveEnsemblExons, retrieveEnsemblGFF, list_exons_uniq, ensembl)
+
+
+
+# if(F){
+# library(GenomicFeatures)
+# supportedUCSCtables()
+# hg19.refgene.tx <- makeTranscriptDbFromUCSC(genome = "hg19", tablename = "refGene")
+# save(hg19.refgene.tx, file="Results/hg19_refgene_tx.RData")
+# 
+# #write exons
+# list_goi_exons<-exons(hg19.refgene.tx, list(gene_id = list_goi$Entrez.Gene),columns=c("gene_id","exon_id"))
+# # show Genes that are in alternative haplotype region
+# to_write <- Grange2bed(list_goi_exons)
+# tmp2 <- to_write[grep("hap", to_write$seqnames),]
+# subset(list_goi, Entrez.Gene %in% unique(unlist(tmp2$gene_id)))
+# subset(list_goi, Entrez.Gene %in% unique(unlist(subset(tmp, seqnames=="Y")$gene_id)))
+# 
+# #convert Grange object to 
+# Grange2bed<-function(GrangeObject){
+#   returns<-droplevels(as.data.frame(GrangeObject))
+#   returns$seqnames<-sapply(returns$seqnames,function(x) gsub("chr","",x))
+#   return(returns)
+# }
+# 
+# }

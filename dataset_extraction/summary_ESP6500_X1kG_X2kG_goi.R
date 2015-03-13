@@ -1,36 +1,39 @@
 if (F){
-  load("/Volumes/Orchestra/seq/1000G/ALL.autosomes.phase3_shapeit2_mvncall_integrated_v4.20130502.sites.goi.RData")
+  load("./DataSet_Results/ALL.autosomes.phase3_shapeit2_mvncall_integrated_v5.20130502.sites.goi.RData")
   call_set <- droplevels(subset(call_set, Gene %in% list_goi$Gene & Impact %in% c("MODERATE", "HIGH")))
-  call_set <- createVarUid(call_set)
+  call_set <- call_set %>% labelVarUid %>% labelUid
   # remove duplicate entries
-  call_set <- arrange(call_set, var_uid, EFF)
+  call_set <- arrange(call_set, var_uid, Impact)
   call_set <- call_set[!duplicated(call_set$var_uid), ]
-  colnames(call_set)[colnames(call_set)=="AC"] <- "X2kG_AC"
-  colnames(call_set)[colnames(call_set)=="AF"] <- "X2kG_AF"
-  colnames(call_set)[colnames(call_set)=="AN"] <- "X2kG_AN"
+  call_set <- call_set %>% plyr::rename(., replace=c( "AC"="X2kG_AC", "AF"="X2kG_AF", "AN"="X2kG_AN"))
   X2kG_goi <- call_set
   #save(X2kG_goi, file="Results/X2kG_goi.RData")
   
-  load("/Volumes/Orchestra/seq/1000G/ALL.wgs.phase1_release_v3.20101123.snps_indels.sites.goi.RData")
-  call_set <- droplevels(subset(call_set, Gene %in% list_goi$Gene & Impact %in% c("MODERATE", "HIGH")))
-  call_set <- createVarUid(call_set)
+  #load("./DataSet_Results/ALL.wgs.phase1_release_v3.20101123.snps_indels.sites.goi.RData")
+  #call_set <- droplevels(subset(call_set, Gene %in% list_goi$Gene & Impact %in% c("MODERATE", "HIGH")))
+  #call_set <- createVarUid(call_set)
   # remove duplicate entries
-  call_set <- arrange(call_set, var_uid, EFF)
-  call_set <- call_set[!duplicated(call_set$var_uid), ]
-  colnames(call_set)[colnames(call_set)=="X1kG_AF"] <- "X1kG_LDAF"
-  colnames(call_set)[colnames(call_set)=="AF"] <- "X1kG_AF"
-  colnames(call_set)[colnames(call_set)=="ERATE"] <- "X1kG_ERATE"
-  X1kG_goi <- call_set
+  #call_set <- arrange(call_set, var_uid, Impact)
+  #call_set <- call_set[!duplicated(call_set$var_uid), ]
+  #colnames(call_set)[colnames(call_set)=="X1kG_AF"] <- "X1kG_LDAF"
+  #colnames(call_set)[colnames(call_set)=="AF"] <- "X1kG_AF"
+  #colnames(call_set)[colnames(call_set)=="ERATE"] <- "X1kG_ERATE"
+  #X1kG_goi <- call_set
   #save(X1kG_goi, file="Results/X1kG_goi.RData")
   
-  load("/Volumes/Orchestra/seq/ESP6500/ESP6500SI-V2-SSA137.updatedProteinHgvs.snps_indels.goi.snpEff.RData")
+  load("./DataSet_Results/ESP6500SI-V2-SSA137.updatedProteinHgvs.snps_indels.goi.RData")
   call_set <- droplevels(subset(call_set, Gene %in% list_goi$Gene & Impact %in% c("MODERATE", "HIGH")))
-  call_set <- createVarUid(call_set)
+  call_set <- call_set %>% labelVarUid %>% labelUid
   # remove duplicate entries
-  call_set <- arrange(call_set, var_uid, EFF)
+  call_set <- arrange(call_set, var_uid, Impact)
   call_set <- call_set[!duplicated(call_set$var_uid), ]
   ESP_goi <- call_set
-  save(X2kG_goi, X1kG_goi, ESP_goi, file="Results/ESP_X2kG_goi.RData")
+  # hack ESP to mimic TCGA ethnic composition
+  #tmp<-apply(ESP_goi[c("ESP_AA_AC", "ESP_AA_AN", "ESP_EA_AC", "ESP_EA_AN")], 1, function(x) return(c(ESP_fAC=floor(x[1]/9*x[4]/x[2]+x[3]), ESP_fAN=floor(x[4]*(1+1/9)))))
+  #tmp<- as.data.frame(t(tmp))
+  #colnames(tmp) <- c("ESP_fAC", "ESP_fAN")
+  #ESP_goi <- cbind(ESP_goi, tmp)
+  save(X2kG_goi, ESP_goi, file="DataSet_Results/ESP_X2kG_goi.RData")
 }
 
 
