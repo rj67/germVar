@@ -74,7 +74,7 @@ p
 ggsave(file="solid_normal_probe_hist.png", width=4, height=4)
 
 write.csv(subset(solid_cnv, suspect)[c("filename", "barcode", "Sample", "disease", "V15")], quote=F, row.names=F, file="Output/SNPChip_solid_flagged.csv" )
-save(solid_cnv, file="Results/")
+save(solid_cnv, file="Results/filter_Solid_Normal.RData")
 rm(studies, all_cnv, copy_file, summarise_cnv_file, summarise_cnv_study)
 
 #blood_cnv <- subset(all_cnv, Tissue==10)

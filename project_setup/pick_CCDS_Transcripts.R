@@ -97,23 +97,38 @@ CCDS_15$in_37 <- CCDS_15$Transcript %in% list_gff$Transcript
 ### flag the GRCh37.75 transcripts in CCDS
 list_gff$in_ccds <- list_gff$Transcript %in% CCDS_15$Transcript
 
+# read in APPRIS prediction
+APPRIS_37 <- read.delim("../dataDump/APPRIS//Homo_sapiens.GRCh37.appris_data.principal.txt", header=F)[c("V2", "V3", "V4","V5")] %>%
+  mutate(., Principal = grepl("PRINCIPAL", V5)) %>% plyr::rename(., rep=c("V2" = "Ensembl.Gene", "V3"="Transcript", "V4"="ccds")) %>% 
+  plyr::join(., list_goi[c("Ensembl.Gene", "Gene")]) %>% subset(., !is.na(Gene))
+
+### flag the GRCh37.75 transcripts in APPRIS predicted principal transcript
+list_gff$appris <- list_gff$Transcript %in% subset(APPRIS_37, Principal)$Transcript
+
 ### write the longest GRCh37.75 in CCDS, else the longest
 # rank transcript on forward strand by start position, reverse strand by stop postion
 list_gff$actual_start <- with(list_gff, mapply(function(x, y, z) ifelse(x==1, y, -z), strand, transcript_start, transcript_end))
-list_gff_long<- arrange(list_gff, Gene, !in_ccds, -cds_length, actual_start) %>% subset(., !duplicated(Gene))
+list_gff_long<- arrange(list_gff, Gene, !in_ccds, !appris, -cds_length, actual_start) %>% subset(., !duplicated(Gene))
 write(list_gff_long$Transcript, file="Output/list_goi_GRCh37.75_long_transcript.txt")
 
 # write all the CCDS transcript, or the longest
 list_gff_CCDS<- subset(list_gff, in_ccds | Transcript %in% list_gff_long$Transcript)
 write(list_gff_CCDS$Transcript, file="Output/list_goi_GRCh37.75_CCDS_transcript.txt")
-
-rm(CCDS_15, CCDS_17)
-
 list_gff_CCDS$longest <- list_gff_CCDS$Transcript %in% list_gff_long$Transcript
-tmp <- dplyr::summarise(group_by(list_gff_CCDS, Gene), start = transcript_start[longest] <= min(transcript_start), end = transcript_end[longest] >= min(transcript_end))
-for(Gene in list_gff_long$Gene){
-  print (Gene)
-}
+
+list_exons_CCDS <- subset(list_exons, Transcript %in% list_gff_CCDS$Transcript)
+list_exons_CCDS %<>% plyr::rename(., rep=c("rank"="ExonRank"))
+# figure out the last coding exon, some weird Transcript have a UTR as last exon, this would mess up the NMD prediction
+list_gff_CCDS %<>% plyr::join(., list_exons_CCDS %>% subset(., !is.na(cds_start)) %>% group_by(., Transcript) %>% dplyr::summarise(., TotalExon = max(ExonRank)), by="Transcript")
+
+save(list_gff_CCDS, list_gff_long, list_exons_CCDS, file="Results/candidate_gene_CCDS_transcripts.RData")
+rm(CCDS_15, CCDS_17, APPRIS_37, list_gff, list_exons)
+
+
+#tmp <- dplyr::summarise(group_by(list_gff_CCDS, Gene), start = transcript_start[longest] <= min(transcript_start), end = transcript_end[longest] >= min(transcript_end))
+#for(Gene in list_gff_long$Gene){
+#  print (Gene)
+#}
 
 
 # 
